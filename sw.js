@@ -1,5 +1,5 @@
 // MaçRadar service worker: sayfayı çevrimdışı açar, canlı API'yi asla önbelleğe almaz.
-const C = "macradar-v4";
+const C = "macradar-v5";
 const CORE = ["macradar.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
@@ -39,4 +39,22 @@ self.addEventListener("fetch", (e) => {
       return res;
     }).catch(() => caches.match(req).then((hit) => hit || caches.match("macradar.html")))
   );
+});
+
+// Arka plan bildirimleri: sunucudan gelen mesajı telefon bildirimi olarak göster
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (x) { d = { t: "MaçRadar", b: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.t || "MaçRadar", {
+    body: d.b || "", tag: d.tag || undefined, renotify: true, icon: "icon-192.png", badge: "icon-192.png",
+    vibrate: [300, 100, 300], data: { url: d.url || "./macradar.html" },
+  }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "./macradar.html", self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) { if (c.url.indexOf("macradar") > -1 && "focus" in c) return c.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });
