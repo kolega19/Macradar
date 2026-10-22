@@ -486,9 +486,25 @@ function parseLast(list,tid){
   });
   return{form:f.join("-"),gf:n?gf/n:null,ga:n?ga/n:null,n:n};
 }
+// API hata türü: günlük hak bitti / dakikalık sınır / plan kısıtı / diğer
+function errKind(j){
+  var e=j&&j.errors;if(!e||Array.isArray(e)&&!e.length||typeof e==="object"&&!Object.keys(e).length)return null;
+  var t=JSON.stringify(e);
+  if(/ratelimit|too many requests|per minute/i.test(t))return "minute";
+  if(/"requests"|request limit for the day|reached the request limit|daily/i.test(t))return "daily";
+  if(/"plan"|plan/i.test(t))return "plan";
+  return "other";
+}
+// Ücretsiz plan bu sezonun verisine izin vermiyorsa: bir gün boyunca sezon isteklerini hiç gönderme (boşa istek harcamasın)
+var PL=load("mr_planlock",0);
+function planLocked(){return Date.now()-PL<DAY}
+function notePlan(j){if(errKind(j)==="plan"){PL=Date.now();save("mr_planlock",PL);return true}return false}
+var PLAN_MSG="Ücretsiz plan bu sezonun verisine izin vermiyor; bu veriler yarına kadar istenmeyecek";
 async function teamLast(tid){
   var c=cget("last_"+tid,DAY);if(c)return c;
+  if(planLocked())return parseLast([],tid);
   var o=await apiJ("/fixtures?team="+tid+"&last=5");
+  if(errKind(o.j)){notePlan(o.j);return parseLast([],tid)}
   var v=parseLast(o.j.response,tid);cset("last_"+tid,v);return v;
 }
 var INF={};
@@ -497,7 +513,9 @@ async function standing(lg,se,tid){var t=await once("st_"+lg+"_"+se,function(){r
 async function standingAll(lg,se){
   var key="st_"+lg+"_"+se,c=cget(key,DAY);
   if(!c){
+    if(planLocked())return {};
     var o=await apiJ("/standings?league="+lg+"&season="+se),t={};
+    if(errKind(o.j)){notePlan(o.j);return {}}
     try{(o.j.response[0].league.standings||[]).forEach(function(g){g.forEach(function(r){t[r.team.id]={rk:r.rank,pts:r.points}})})}catch(e){}
     c=t;cset(key,c);
   }
@@ -506,6 +524,7 @@ async function standingAll(lg,se){
 async function h2h(a,b){
   var key="h2h_"+Math.min(a,b)+"_"+Math.max(a,b),c=cget(key,DAY);if(c)return c;
   var o=await apiJ("/fixtures/headtohead?h2h="+a+"-"+b+"&last=5"),v={wa:0,wb:0,d:0,g:0,n:0};
+  if(errKind(o.j)){notePlan(o.j);return v}
   (o.j.response||[]).forEach(function(x){
     if(x.goals.home==null)return;v.n++;v.g+=x.goals.home+x.goals.away;
     var wid=x.teams.home.winner?x.teams.home.id:x.teams.away.winner?x.teams.away.id:null;
@@ -515,11 +534,13 @@ async function h2h(a,b){
 }
 // Sezonun biten maçlarından lig gol ortalaması ve takım hücum/savunma gücü (lig başına günde 1 istek)
 var SRC={};
-function seasonRatings(lg,se){return once("ss_"+lg+"_"+se,function(){return seasonRatings0(lg,se)})}
-async function seasonRatings0(lg,se){
+function seasonRatings(lg,se,gl){return once("ss_"+lg+"_"+se,function(){return seasonRatings0(lg,se,gl)})}
+async function seasonRatings0(lg,se,gl){
   var key="ss2_"+lg+"_"+se,c=cget(key,DAY);if(c){SRC[lg+"_"+se]=c;return c}
+  if(se==="g"){c=await goalRatings(gl);cset(key,c);SRC[lg+"_"+se]=c;return c}
+  if(planLocked())throw new Error(PLAN_MSG);
   var o=await apiJ("/fixtures?league="+lg+"&season="+se+"&status=FT-AET-PEN"),g=0,n=0,hg=0,ag=0,o25=0,bt=0,T={};
-  if(o.j.errors&&Object.keys(o.j.errors).length)throw new Error(JSON.stringify(o.j.errors));
+  if(errKind(o.j)){if(notePlan(o.j))throw new Error(PLAN_MSG);throw new Error(JSON.stringify(o.j.errors))}
   (o.j.response||[]).forEach(function(x){
     var a=x.goals.home,b=x.goals.away;if(a==null||b==null)return;
     g+=a+b;n++;hg+=a;ag+=b;if(a+b>=3)o25++;if(a>0&&b>0)bt++;
@@ -774,12 +795,12 @@ async function loadBulten(off){
       var o=await apiJ("/fixtures?date="+ds+"&timezone="+encodeURIComponent(TZ));
       if(o.j.errors&&Object.keys(o.j.errors).length)throw new Error(JSON.stringify(o.j.errors));
       var ids=LG.map(function(l){return l.id});
-      c=(o.j.response||[]).filter(function(f){return ids.indexOf(f.league.id)>-1}).map(function(f){return{id:String(f.fixture.id),ts:f.fixture.timestamp,st:f.fixture.status.short,el:f.fixture.status.elapsed,lid:f.league.id,se:f.league.season,lg:f.league.country+" • "+f.league.name,h:f.teams.home.name,a:f.teams.away.name,hid:f.teams.home.id,aid:f.teams.away.id,hl:f.teams.home.logo,al:f.teams.away.logo,gh:f.goals.home,ga:f.goals.away,hh:f.score&&f.score.halftime?f.score.halftime.home:null,ha:f.score&&f.score.halftime?f.score.halftime.away:null}});
+      c=(o.j.response||[]).filter(function(f){return ids.indexOf(f.league.id)>-1}).map(function(f){return{id:String(f.fixture.id),ts:f.fixture.timestamp,st:f.fixture.status.short,el:f.fixture.status.elapsed,lid:f.league.id,se:f.league.season,lg:f.league.country+" • "+f.league.name,h:f.teams.home.name,a:f.teams.away.name,hid:f.teams.home.id,aid:f.teams.away.id,hl:f.teams.home.logo,al:f.teams.away.logo,gh:f.goals.home,ga:f.goals.away,hh:f.score&&f.score.halftime?f.score.halftime.home:null,ha:f.score&&f.score.halftime?f.score.halftime.away:null,gl:f.gl||null}});
       cset("fx_"+ds,c);
     }
-    var need={};c.forEach(function(x){if(SET.lg.indexOf(x.lid)>-1)need[x.lid+"_"+x.se]=[x.lid,x.se]});
+    var need={};c.forEach(function(x){if(SET.lg.indexOf(x.lid)>-1)need[x.lid+"_"+x.se]=[x.lid,x.se,x.gl]});
     S.bl[ds]={st:"ok",items:c};resolveBP(c);render();
-    for(var k in need){if(SRC[k])continue;try{await seasonRatings(need[k][0],need[k][1]);render()}catch(e){S.bl[ds].warn="Bazı liglerin sezon verisi alınamadı: "+String(e.message||e).slice(0,160)+". İstek sınırıysa biraz sonra yeniden açınca tamamlanır; plan kısıtıysa model yerine bahis oranları kullanılır (Analiz)."}}
+    for(var k in need){if(SRC[k])continue;try{await seasonRatings(need[k][0],need[k][1],need[k][2]);render()}catch(e){S.bl[ds].warn="Bazı liglerin sezon verisi alınamadı: "+String(e.message||e).slice(0,160)+". İstek sınırıysa biraz sonra yeniden açınca tamamlanır; plan kısıtıysa model yerine bahis oranları kullanılır (Analiz)."}}
     render();
   }catch(e){S.bl[ds]={st:"err",msg:String(e.message||e)};render()}
 }
@@ -1055,6 +1076,7 @@ function bultenView(){
   for(var o=-1;o<4;o++)h+='<button data-bd="'+o+'" class="'+(S.bd===o?'on':'')+'">'+dlabel(o)+'</button>';
   h+='</div><div class="seg">'+[["saat","Saat"],["gol","En gollü"],["fav","Favori"]].map(function(x){return '<button data-bs="'+x[0]+'" class="'+(S.bs===x[0]?'on':'')+'">'+x[1]+'</button>'}).join("")+'</div></div>';
   if(!B||B.st==="loading")return h+empty("Bülten yükleniyor","Seçili liglerdeki maçlar ve sezon verileri alınıyor.");
+  if(B.st==="err"&&(FB.on||FB.daily))return h+empty("Bülten şu an kullanılamıyor","API-Football’un günlük istek hakkı bitti. Bülten, oranlar ve maç öncesi veriler hakkın yenilendiği "+resetTime()+" sonrasında gelir. Canlı skorlar yedek kaynaktan devam ediyor.");
   if(B.st==="err")return h+empty("Bülten alınamadı",E(B.msg)+" Ayarlar’dan API anahtarını ve istek hakkını kontrol et.");
   var list=B.items.filter(function(x){return B.demo||SET.lg.indexOf(x.lid)>-1});
   var pr=function(x){return preOf(x)};
@@ -1219,8 +1241,15 @@ function saveHist(){var o={};S.tr.forEach(function(id){var s=S.lv[id];if(s&&LIVE
 var KEY=load("mr_key","")||DEFAULT_KEY,DEMO_M=M,DEMO_LV=S.lv;
 var SRV=(load("mr_srv","")||"").replace(/\/+$/,""),STOK=load("mr_stok",""),DEV=load("mr_dev","");
 if(!DEV){DEV=Math.random().toString(36).slice(2,10)+Date.now().toString(36);save("mr_dev",DEV)}
+// Dakikada en fazla 8 istek (ücretsiz planın 10/dk sınırının altında); Pro planda serbest
+var RQ=[];
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+async function slot(){
+  var cap=REM!=null&&REM>1500?250:8;
+  for(;;){var now=Date.now();RQ=RQ.filter(function(t){return now-t<60000});if(RQ.length<cap){RQ.push(now);return}await sleep(60000-(now-RQ[0])+200)}
+}
 async function apiJ0(p){
-  var r;
+  var r;if(!/^\/status/.test(p))await slot();
   if(SRV&&STOK)r=await fetch(SRV+"/api"+p,{headers:{"x-app-token":STOK}});
   else r=await fetch(DIRECT?API+p:p,DIRECT?{headers:{"x-apisports-key":KEY}}:undefined);
   return{j:await r.json(),rem:r.headers.get("x-ratelimit-requests-remaining")};
@@ -1278,13 +1307,18 @@ async function pushOff(){
    API-Football günlük hakkı bitince (veya kota hatası verince) canlı maç listesi ve istatistikler GOAL API'den alınır.
    GOAL API'nin yanıt alan adları belgede tam yazmadığı için okuma esnek yapıldı; "Bağlantıyı test et" ile doğrulanır. */
 var GBASE="https://api.goal-api.com/v1",GKEY=load("mr_gkey",""),FB={on:false,t:0};
+function resetTime(){var n=new Date(),r=new Date(Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate()+1));return pad(r.getHours())+":"+pad(r.getMinutes())}
 function isQuotaErr(j){var e=j&&j.errors;if(!e||Array.isArray(e)&&!e.length||typeof e==="object"&&!Object.keys(e).length)return false;return /request|limit|quota|rate|suspend/i.test(JSON.stringify(e))}
 async function apiJ(p){
   if(FB.on&&Date.now()-FB.t>30*60e3)FB.on=false; // 30 dk'da bir ana kaynağı yeniden dene
   if(FB.on&&GKEY&&DIRECT)return goalJ(p);
   try{
-    var o=await apiJ0(p);
-    if(GKEY&&DIRECT&&(isQuotaErr(o.j)||(o.rem!=null&&o.rem!==""&&+o.rem<=0))){FB.on=true;FB.t=Date.now();return goalJ(p)}
+    var o=await apiJ0(p),k=errKind(o.j);
+    if(k==="minute"){await sleep(15000);o=await apiJ0(p);k=errKind(o.j)}
+    if(k==="daily"||(o.rem!=null&&o.rem!==""&&+o.rem<=0)){
+      FB.daily=true;REM=0;
+      if(GKEY&&DIRECT){FB.on=true;FB.t=Date.now();return goalJ(p)}
+    }
     return o;
   }catch(e){
     if(GKEY&&DIRECT&&/^\/fixtures(\?live|\/statistics)/.test(p))return goalJ(p);
@@ -1309,6 +1343,80 @@ function goalFixture(x){
     goals:{home:gnum(gv(x,["homeScore","home_score","score.home","scores.home","goals.home","match_hometeam_score","homeTeam.score","score.fullTime.home","score.current.home"]))||0,
            away:gnum(gv(x,["awayScore","away_score","score.away","scores.away","goals.away","match_awayteam_score","awayTeam.score","score.fullTime.away","score.current.away"]))||0}};
 }
+// GOAL API lig adlarını uygulamadaki liglerle eşleştir
+var LGPAT=[[203,/s[uü]per ?lig/i,/t[uü]rk/i],[204,/(^|\s)1\.? ?lig|tff/i,/t[uü]rk/i],[39,/^premier league$/i,/england|ingiltere/i],[140,/la ?liga|primera divisi/i,/spain|espa|ispanya/i],
+  [135,/^serie a$/i,/ital/i],[78,/^bundesliga$/i,/german|deutsch|almanya/i],[61,/^ligue 1$/i,/france|fransa/i],[88,/eredivisie/i,null],[94,/primeira|liga portugal/i,/portug/i],
+  [2,/champions league/i,null],[3,/europa league/i,null],[848,/conference league/i,null]];
+function lgMatch(name,country){
+  name=String(name||"").trim();country=String(country||"");
+  if(/women|kad[iı]n|u-?\d\d|youth|afc|caf|concacaf/i.test(name))return null;
+  for(var i=0;i<LGPAT.length;i++){var r=LGPAT[i];if(r[1].test(name)&&(!r[2]||!country||r[2].test(country)))return r[0]}
+  return null;
+}
+function gTeamId(x,side){var id=gv(x,[side+"Team.id",side+"_team.id",side+".id","teams."+side+".id",side+"TeamId",side+"_team_id","match_"+side+"team_id"]),nm=gv(x,[side+"Team.name",side+"_team.name",side+".name","teams."+side+".name","match_"+side+"team_name",side+"TeamName",side+"_team_name",side+"_name"]);return id!=null?"gt_"+id:"gn_"+nname(nm)}
+function gSt(x){
+  var p=String(gv(x,["matchPeriod","clock.period","status.short","status","match_status","statusShort","period"])||"").toUpperCase();
+  if(/FINISH|ENDED|^FT$|FULL_TIME|AFTER|AET|PEN/.test(p))return "FT";
+  if(/HALF_TIME|^HT$|BREAK/.test(p))return "HT";
+  if(/SECOND|2H/.test(p))return "2H";
+  if(/FIRST|1H|LIVE|IN_PLAY|^\d+/.test(p))return "1H";
+  if(/POSTP|CANC|ABAND|SUSP/.test(p))return "PST";
+  return "NS";
+}
+function gKick(x){
+  var k=gv(x,["kickoffUtc","kickoff","startTime","start_time","utcDate","date","fixture.date"]);
+  if(k&&!/^\d{4}-\d{2}-\d{2}$/.test(String(k))){var t=Date.parse(k);if(!isNaN(t))return Math.floor(t/1000)}
+  var ts=gnum(gv(x,["timestamp","fixture.timestamp","match_timestamp"]));if(ts)return ts>1e12?Math.floor(ts/1000):ts;
+  var d=gv(x,["matchDate","match_date","date"]),tm=gv(x,["matchTime","match_time","time"])||"00:00";
+  if(d){var t2=Date.parse(String(d).slice(0,10)+"T"+String(tm).slice(0,5)+":00Z");if(!isNaN(t2))return Math.floor(t2/1000)}
+  return null;
+}
+function goalSched(x){
+  var id=gv(x,["id","match_id","matchId","fixtureId","fixture_id","fixture.id"]);
+  var hn=gv(x,["homeTeam.name","home_team.name","home.name","teams.home.name","match_hometeam_name","homeTeamName","home_team_name","home_name"]);
+  var an=gv(x,["awayTeam.name","away_team.name","away.name","teams.away.name","match_awayteam_name","awayTeamName","away_team_name","away_name"]);
+  var ts=gKick(x);if(id==null||!hn||!an||!ts)return null;
+  var ln=gv(x,["league.name","league_name","leagueName","competition.name","tournament.name"])||"",lc=gv(x,["country.name","league.country","country_name","countryName","competition.country","league.country.name"])||"";
+  var st=gSt(x),gh=gnum(gv(x,["homeScore","home_score","score.home","scores.home","goals.home","match_hometeam_score","homeTeam.score","score.fullTime.home","score.current.home"])),ga=gnum(gv(x,["awayScore","away_score","score.away","scores.away","goals.away","match_awayteam_score","awayTeam.score","score.fullTime.away","score.current.away"]));
+  return{fixture:{id:"g"+id,timestamp:ts,status:{short:st,elapsed:gnum(gv(x,["matchElapsed","clock.elapsed","elapsed"]))}},
+    league:{id:lgMatch(ln,lc),season:"g",country:lc,name:ln},gl:gv(x,["league.id","league_id","leagueId","competition.id","competition_id"]),
+    teams:{home:{id:gTeamId(x,"home"),name:hn,logo:gv(x,["homeTeam.logo","homeTeam.badge","home_team.logo","team_home_badge","home.logo","teams.home.logo"])},
+           away:{id:gTeamId(x,"away"),name:an,logo:gv(x,["awayTeam.logo","awayTeam.badge","away_team.logo","team_away_badge","away.logo","teams.away.logo"])}},
+    goals:{home:st==="NS"?null:gh,away:st==="NS"?null:ga},
+    score:{halftime:{home:gnum(gv(x,["score.halfTime.home","score.halftime.home","halftimeScore.home","match_hometeam_halftime_score","htHomeScore"])),away:gnum(gv(x,["score.halfTime.away","score.halftime.away","halftimeScore.away","match_awayteam_halftime_score","htAwayScore"]))}}};
+}
+// Puan tablosundan (oynanan, atılan, yenilen) lig ve takım gücü
+function gRows(j){
+  var out=[],seen=0;
+  (function walk(v){if(seen++>20000||!v||typeof v!=="object")return;if(Array.isArray(v)){v.forEach(walk);return}
+    var pl=gv(v,["played","all.played","matchesPlayed","overall.played","overall_league_payed","overall_league_played","games","playedGames"]);
+    var nm=gv(v,["team.name","team_name","teamName"]);
+    if(pl!=null&&nm){out.push(v);return}
+    Object.keys(v).forEach(function(k){walk(v[k])});
+  })(j);
+  return out;
+}
+async function goalRatings(gl){
+  if(gl==null)throw new Error("Yedek kaynakta lig bilgisi yok");
+  var c=cget("gss_"+gl,DAY);if(c)return c;
+  var cands=["/standings?league="+gl,"/leagues/"+gl+"/standings","/standings/"+gl],rows=[];
+  for(var i=0;i<cands.length&&!rows.length;i++){try{rows=gRows(await gFetch(cands[i]))}catch(e){}}
+  if(rows.length<4)throw new Error("Yedek kaynakta bu ligin puan tablosu okunamadı");
+  var T={},n=0,G=0,hgs=0,ags=0,hasHA=true;
+  rows.forEach(function(r){
+    var tid=gv(r,["team.id","team_id","teamId"]),nm=gv(r,["team.name","team_name","teamName"]);
+    var pl=gnum(gv(r,["played","all.played","matchesPlayed","overall.played","overall_league_payed","overall_league_played","games","playedGames"]))||0;
+    var gf=gnum(gv(r,["goalsFor","all.goals.for","goals.for","overall.goalsFor","overall_league_GF","gf","scored","goals_for"]))||0;
+    var ga=gnum(gv(r,["goalsAgainst","all.goals.against","goals.against","overall.goalsAgainst","overall_league_GA","ga","conceded","goals_against"]))||0;
+    var hf=gnum(gv(r,["home.goals.for","home.goalsFor","home_league_GF","homeGoalsFor"])),af=gnum(gv(r,["away.goals.for","away.goalsFor","away_league_GF","awayGoalsFor"]));
+    if(hf==null||af==null)hasHA=false;else{hgs+=hf;ags+=af}
+    T[tid!=null?"gt_"+tid:"gn_"+nname(nm)]={gf:gf,ga:ga,n:pl};n+=pl;G+=gf;
+  });
+  n=Math.round(n/2);if(n<10)throw new Error("Sezonda henüz yeterli maç yok");
+  // ev/deplasman ayrımı yoksa: geçmiş veride gollerin yaklaşık %56'sı ev sahibinden
+  var hg=hasHA?hgs:G*.56,ag=hasHA?ags:G*.44;
+  c={n:n,avg:G/n,hg:hg,ag:ag,o25:n*.5,bt:n*.5,t:T,src:"goal"};cset("gss_"+gl,c);return c;
+}
 var GMAP=[[/inside/i,"Shots insidebox"],[/on.?(goal|target)/i,"Shots on Goal"],[/total.?shots|shots.?total|^shots$|attempts/i,"Total Shots"],[/corner/i,"Corner Kicks"],[/foul/i,"Fouls"],[/yellow/i,"Yellow Cards"],[/red/i,"Red Cards"],[/possession/i,"Ball Possession"]];
 function gStats(j){
   var d=j&&(j.data!=null?j.data:j),rows=[];
@@ -1327,6 +1435,20 @@ async function goalJ(p){
       for(var pg=0;pg<4;pg++){var j=await gFetch("/fixtures/live?limit=100&offset="+off);var a=gArr(j);all=all.concat(a);if(!(j.pagination&&j.pagination.hasMore))break;off+=a.length||100}
       return{j:{errors:[],response:all.map(goalFixture).filter(Boolean)},rem:null,fb:true};
     }
+    var dm=p.match(/^\/fixtures\?date=(\d{4}-\d{2}-\d{2})/);
+    if(dm){
+      var D=dm[1],cands=["/fixtures?date="+D,"/fixtures?from="+D+"&to="+D,"/fixtures/date/"+D],gi=load("mr_gdi",-1),order=gi>=0?[gi].concat([0,1,2].filter(function(x){return x!==gi})):[0,1,2],res=null;
+      for(var ci=0;ci<order.length&&!res;ci++){
+        try{var lst=[],of=0;
+          for(var pg2=0;pg2<6;pg2++){var cu=cands[order[ci]];var jj=await gFetch(cu+(cu.indexOf("?")>-1?"&":"?")+"limit=100&offset="+of);var aa=gArr(jj);lst=lst.concat(aa);if(!(jj.pagination&&jj.pagination.hasMore))break;of+=aa.length||100}
+          var mapped=lst.map(goalSched).filter(Boolean);
+          if(lst.length&&mapped.length){res=mapped;save("mr_gdi",order[ci])}
+        }catch(e){}
+      }
+      if(!res)return{j:{errors:{yedek:"Yedek kaynaktan bu günün maçları okunamadı."},response:[]},rem:null,fb:true};
+      return{j:{errors:[],response:res},rem:null,fb:true};
+    }
+    if(/^\/odds/.test(p))return{j:{errors:{yedek:"Yedek kaynakta bahis oranı yok; tahmin modele göre gösteriliyor."},response:[]},rem:null,fb:true};
     var q=p.match(/^\/fixtures\/statistics\?fixture=g(.+)$/);
     if(q){var js=await gFetch("/fixtures/"+encodeURIComponent(q[1])+"/statistics");return{j:{errors:[],response:gStats(js)},rem:null,fb:true}}
     return{j:{errors:{yedek:"Bu veri yedek kaynakta yok (API-Football hakkı yenilenince gelir)."},response:[]},rem:null,fb:true};
@@ -1393,7 +1515,7 @@ async function poll(){
     pushAl(add);resolve();
     goals.forEach(function(g){goalFx(g[0],g[1],g[2])});
     if(o.rem!=null&&o.rem!=="")REM=+o.rem;else if(REM!=null)REM=Math.max(0,REM-1);
-    info("Canlı"+(o.fb?" (yedek: GOAL API)":"")+" • "+nm.length+" maç • "+(REM!=null&&REM>1500?"15 sn":"60 sn")+" • "+(o.fb?"API-Football hakkı bitti":(REM!=null?REM:"?")+" istek"));
+    info("Canlı"+(o.fb?" (yedek: GOAL API)":"")+" • "+nm.length+" maç • "+(REM!=null&&REM>1500?"15 sn":"60 sn")+" • "+(o.fb?"API-Football günlük hakkı bitti, "+resetTime()+"’te yenilenir":(REM!=null?REM:"?")+" istek"));
     render();
     S.ex.forEach(function(id){if(nl[id])loadLiveOdds(id)});
     S.ex.concat(S.tr).filter(function(id,i,a){return a.indexOf(id)===i}).forEach(function(id){
@@ -1438,6 +1560,15 @@ async function gTest(){
     var msg="HTTP "+r.status+(rl?" · kalan istek "+rl:"")+"\nOkunan canlı maç: "+fx.length+" / "+arr.length;
     if(fx[0])msg+="\nÖrnek: "+fx[0].teams.home.name+" "+fx[0].goals.home+"-"+fx[0].goals.away+" "+fx[0].teams.away.name+" ("+fx[0].fixture.status.elapsed+"’) · "+fx[0].league.name;
     if(!fx.length)msg+="\n\nHam yanıtın başı (bunu Claude’a gönderebilirsin, anahtar içermez):\n"+txt.slice(0,900);
+    out.textContent=msg+"\n\nBülten deneniyor…";
+    var dj=await goalJ("/fixtures?date="+dstr(0)),dl=dj.j.response||[],ours=dl.filter(function(f){return f.league.id!=null});
+    msg+="\n\nBülten (bugün): "+dl.length+" maç okundu, seçili liglerden "+ours.length;
+    if(ours[0])msg+="\nÖrnek: "+ours[0].teams.home.name+" - "+ours[0].teams.away.name+" · "+ours[0].league.name+" · "+hhmm(ours[0].fixture.timestamp);
+    if(dj.j.errors&&dj.j.errors.yedek)msg+="\n"+dj.j.errors.yedek;
+    var withL=ours.filter(function(f){return f.gl!=null})[0];
+    if(withL){try{var R=await goalRatings(withL.gl);msg+="\nPuan tablosu ("+withL.league.name+"): "+Object.keys(R.t).length+" takım, "+R.n+" maç ✓"}catch(e){msg+="\nPuan tablosu: "+e.message}}
+    else if(dl.length)msg+="\nLig numarası okunamadı; model için puan tablosu alınamaz.";
+    if(!dl.length||!ours.length){try{var rr=await fetch(GBASE+"/fixtures?date="+dstr(0)+"&limit=3",{headers:{"Authorization":"Bearer "+GKEY}});msg+="\n\nBülten ham yanıtın başı:\n"+(await rr.text()).slice(0,900)}catch(e){}}
     out.textContent=msg;
   }catch(e){out.textContent="Bağlanılamadı: "+String(e.message||e)+"\nTarayıcı bu siteye doğrudan bağlanmaya izin vermiyor olabilir (CORS). Bu durumda yedek kaynak çalışmaz; haber ver, başka bir çözüm kuralım."}
 }
