@@ -324,6 +324,7 @@ button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     <p>Tahmin aralığı: kaç dakika sonrasına kadarki olayların tahmin edileceği. "4 dk telafili", canlı verinin yaklaşık 1 dakika geç gelmesini hesaba katar ve şu andan itibaren 4 dakikayı hedefler.</p>
     <div class="seg" id="hzs" style="margin:4px 0 14px"><button data-hz="d">4 dk telafili</button><button data-hz="3">3 dk</button><button data-hz="4">4 dk</button><button data-hz="5">5 dk</button></div>
     <p>Uyarı, bir takımın ihtimali bu eşikleri geçince gelir. Varsayılan eşikler, geçmiş maçlarda modelin en yüksek ihtimal verdiği %10'luk dilimin başlangıcıdır. <button class="lnk" id="thr">Varsayılana dön</button></p>
+    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 26.10 · 3</p>
     <div class="rg"><label>Gol eşiği <b id="vg"></b></label><input type="range" id="tg" min="2" max="30" step="0.5"></div>
     <div class="rg"><label>Kart eşiği <b id="vc"></b></label><input type="range" id="tc" min="2" max="40" step="0.5"></div>
     <div class="rg"><label>Penaltı eşiği <b id="vp"></b></label><input type="range" id="tp" min="0.5" max="10" step="0.1"></div>
@@ -748,9 +749,12 @@ function preBlock(m){
   h+='<p class="an" style="margin-top:10px">Modele etkisi: '+E(m.h)+' hücum ×'+mu[0].toFixed(2)+', '+E(m.a)+' hücum ×'+mu[1].toFixed(2)+'. Etki maç ilerledikçe azalır.'+(P.demo?' Demo modunda yalnızca form kullanılır.':'')+'</p></div>';
   return h;
 }
+// API maçı canlı gösterip dakikayı 6 dakikadır ilerletmiyorsa (devre arası hariç) veri akışı durmuştur
+function frozen(s){return !!(s&&LIVE&&s.mt&&Date.now()-s.mt>6*60e3&&["HT","BT","P","INT"].indexOf(s.st)<0)}
+function liveTag(s){return frozen(s)?'<span class="st">'+s.m+'’ · veri durdu</span>':'<span class="st live">Canlı '+s.m+'’</span>'}
 function card(m,force){
   var s=S.lv[m.id],tr=S.tr.indexOf(m.id)>-1,ex=S.ex.indexOf(m.id)>-1,done=s&&s.m>=90;
-  var st=s?(done?'<span class="st">Bitti</span>':'<span class="st live">Canlı '+s.m+'’</span>'):'<span class="st">Başlamadı</span>';
+  var st=s?(done?'<span class="st">Bitti</span>':liveTag(s)):'<span class="st">Başlamadı</span>';
   var fl=FL[m.id]&&Date.now()-FL[m.id]<2400;
   var h='<article class="card'+(tr?' tr':'')+(fl?' flash':'')+'"><div class="top"><span class="lgn">'+E(m.lg)+'</span>'+st+'</div>';
   h+='<div class="board"><div class="tm">'+badge(m.h,m.hl,"h")+'<div class="tn">'+E(m.h)+'</div>'+form(m.hf)+'</div>'+
@@ -1031,7 +1035,8 @@ var LIVE_ST=["1H","HT","2H","ET","BT","P","LIVE","INT"],FIN_ST=["FT","AET","PEN"
 function fxCard(x){
   var open=S.an.indexOf(x.id)>-1,R=analysis(x);recordBP(x,R);
   var P=preOf(x)||(R&&R.mkt?{few:false}:null),HV=R&&R.mkt?R.har:null,live=LIVE_ST.indexOf(x.st)>-1,fin=FIN_ST.indexOf(x.st)>-1,watched=S.wt.some(function(w){return w.id===x.id}),tr=S.tr.indexOf(x.id)>-1;
-  var st=live?'<span class="st live">Canlı '+(x.el||"")+'’</span>':fin?'<span class="st">Bitti</span>':'<span class="st">Başlamadı</span>';
+  var sl=S.lv[x.id],old=live&&!sl&&LIVE&&Date.now()/1000-x.ts>150*60; // canlı listede yok ve başlamasının üzerinden 2,5 saat geçmiş: büyük ihtimalle bitti
+  var st=live?(sl?liveTag(sl):old?'<span class="st">Bitmiş olabilir</span>':'<span class="st live">Canlı '+(x.el||"")+'’</span>'):fin?'<span class="st">Bitti</span>':'<span class="st">Başlamadı</span>';
   var h='<article class="card fx'+(watched||tr?' tr':'')+'"><div class="top"><span class="lgn">'+E(x.lg)+(P&&P.few?'<span class="few">az veri</span>':'')+'</span>'+st+'</div>';
   h+='<div class="board"><div class="tm">'+badge(x.h,x.hl,"h")+'<div class="tn">'+E(x.h)+'</div></div>'+
     ((live||fin)&&x.gh!=null?'<div class="sc">'+x.gh+'<i>:</i>'+x.ga+'</div>':'<div class="ko"><b>'+hhmm(x.ts)+'</b><small>başlama</small></div>')+
@@ -1571,6 +1576,7 @@ async function poll(){
       var c=blank();c.m=f.fixture.status.elapsed||0;c.sc=[f.goals.home||0,f.goals.away||0];c.hs=false;c.st=f.fixture.status.short||"";
       // penaltı sayısı olaylardan (atılan + kaçan); olay listesi yoksa penaltı tahmini doğrulanamaz
       if(Array.isArray(f.events)){c.pn=[0,0];f.events.forEach(function(e){if((e.type==="Goal"&&/penalty/i.test(e.detail||"")&&!/missed/i.test(e.detail||""))||/missed penalty/i.test(e.detail||"")){c.pn[e.team&&e.team.id===f.teams.away.id?1:0]++}})}else c.pn=null;
+      c.mt=old&&old.m===c.m?(old.mt||Date.now()):Date.now(); // dakikanın en son değiştiği an
       if(old){c.hist=old.hist;c.goals=old.goals;if(old.hs){["sh","ot","sib","co","ca","fo","rc"].forEach(function(k){c[k]=old[k]});c.po=old.po;c.hs=true;c.at=old.at}}
       else if(sv&&Date.now()-sv.t<3*36e5){c.hist=sv.hist||[];c.goals=sv.goals||[]}
       if(old&&(c.sc[0]!==old.sc[0]||c.sc[1]!==old.sc[1])){
