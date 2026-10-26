@@ -376,7 +376,8 @@ var TH=Object.assign({g:.12,c:.13,p:.015},load("mr_th",{}));
 var S={tab:"Maçlar",f:"Tümü",q:"",ex:[],lv:{},tr:load("mr_tr",[]).slice(0,MAX),al:load("mr_al",[]),pr:load("mr_pr",[]),wt:load("mr_wt",[]),bd:0,bs:"saat",bl:{},an:[],bp:load("mr_bp",{})};
 var LG=[{id:203,n:"Süper Lig"},{id:204,n:"TFF 1. Lig"},{id:39,n:"Premier League"},{id:140,n:"La Liga"},{id:135,n:"Serie A"},{id:78,n:"Bundesliga"},{id:61,n:"Ligue 1"},{id:88,n:"Eredivisie"},{id:94,n:"Primeira Liga"},{id:2,n:"Şampiyonlar Ligi"},{id:3,n:"Avrupa Ligi"},{id:848,n:"Konferans Ligi"}];
 if(!SET.lg)SET.lg=[203,39,140,135,78,61,2];
-S.pr.forEach(function(r){if(r.st==="w")r.st="?"});
+// açılışta bekleyen gerçek maç tahminleri silinmez; canlı veri gelince doğrulanmaya devam eder (eskiden hepsi "doğrulanamadı" oluyordu)
+S.pr.forEach(function(r){if(r.st==="w"&&!(r.lv===1||(r.lv==null&&/^(g.+|\d{5,})$/.test(String(r.mid)))))r.st="?"});
 var PRI={}, FL={}, PS={}, LIVE=false, DIRECT=false, CAL={};
 var HIST=load("mr_hist",{});
 
@@ -462,9 +463,15 @@ function predictSimple(s,mid){
 }
 function prT(r){return r.t||parseInt(r.id,10)||0}
 function prSorted(){return S.pr.slice().sort(function(a,b){return prT(b)-prT(a)})}
+// İki telefon aynı maçta aynı dakikada aynı uyarıyı üretirse istatistikte tek sayılır (sonuçlanmış olan tercih edilir)
+function prUniq(){
+  var seen={},out=[],rank=function(r){return (r.st==="y"||r.st==="n"?2:r.st==="w"?1:0)+(r.dv===DEV?.5:0)};
+  prSorted().forEach(function(r){var k=[r.mid,r.k,r.ti,r.m,r.hz||"5"].join("|");if(seen[k]==null){seen[k]=out.length;out.push(r)}else if(rank(r)>rank(out[seen[k]]))out[seen[k]]=r});
+  return out;
+}
 function calcCal(){
   ["g","c","p"].forEach(function(k){
-    var mk=MKEY(),hz=HZ(),d=prSorted().filter(function(r){return r.k===k&&(r.mdl||"simple")===mk&&(r.hz||"5")===hz&&(r.st==="y"||r.st==="n")}).slice(0,200);
+    var mk=MKEY(),hz=HZ(),d=prUniq().filter(function(r){return r.k===k&&(r.mdl||"simple")===mk&&(r.hz||"5")===hz&&(r.st==="y"||r.st==="n")}).slice(0,200);
     var n=d.length,h=d.filter(function(r){return r.st==="y"}).length;
     var ap=n?d.reduce(function(a,r){return a+(r.p0!=null?r.p0:r.p)},0)/n:0;
     var f=n&&ap?clamp((h/n)/ap,.5,2):1;
@@ -789,11 +796,13 @@ function demoBulten(off){
   });
 }
 async function loadBulten(off){
-  var ds=dstr(off);if(S.bl[ds]&&S.bl[ds].st!=="err")return;
+  // bugünün ve yarının bülteni birkaç dakikada bir tazelenir (maç durumları ve skorlar değişir)
+  var ds=dstr(off),B0=S.bl[ds],ttl=off<0?6*36e5:(REM!=null&&REM>1500?3:15)*60e3;
+  if(B0&&(B0.st==="loading"||(B0.st==="ok"&&(B0.demo||Date.now()-(B0.t||0)<ttl))))return;
   if(!LIVE){S.bl[ds]={st:"ok",items:demoBulten(off),demo:true};render();return}
-  S.bl[ds]={st:"loading"};render();
+  if(!(B0&&B0.st==="ok")){S.bl[ds]={st:"loading"};render()}
   try{
-    var c=cget("fx_"+ds,off<0?6*36e5:30*60e3);
+    var c=cget("fx_"+ds,ttl);
     if(!c){
       var o=await apiJ("/fixtures?date="+ds+"&timezone="+encodeURIComponent(TZ));
       if(o.j.errors&&Object.keys(o.j.errors).length)throw new Error(JSON.stringify(o.j.errors));
@@ -802,11 +811,13 @@ async function loadBulten(off){
       cset("fx_"+ds,c);
     }
     var need={};c.forEach(function(x){if(SET.lg.indexOf(x.lid)>-1)need[x.lid+"_"+x.se]=[x.lid,x.se,x.gl]});
-    S.bl[ds]={st:"ok",items:c};resolveBP(c);render();
+    S.bl[ds]={st:"ok",items:c,t:Date.now()};resolveBP(c);render();
     for(var k in need){if(SRC[k])continue;try{await seasonRatings(need[k][0],need[k][1],need[k][2]);render()}catch(e){S.bl[ds].warn="Bazı liglerin sezon verisi alınamadı: "+String(e.message||e).slice(0,160)+". İstek sınırıysa biraz sonra yeniden açınca tamamlanır; plan kısıtıysa model yerine bahis oranları kullanılır (Analiz)."}}
     render();
-  }catch(e){S.bl[ds]={st:"err",msg:String(e.message||e)};render()}
+  }catch(e){if(B0&&B0.st==="ok"){B0.t=Date.now();S.bl[ds]=B0}else S.bl[ds]={st:"err",msg:String(e.message||e)};render()}
 }
+// bülten listesindeki maç canlı listede varsa durumunu, dakikasını ve skorunu oradan al
+function liveOver(x){var s=S.lv[x.id];if(!s||!LIVE)return x;return Object.assign({},x,{st:s.st||(s.m>=90?"FT":"1H"),el:s.m,gh:s.sc[0],ga:s.sc[1]})}
 function preOf(x){return prematch(x.demoSR||SRC[x.lid+"_"+x.se],x.hid,x.aid)}
 
 /* ---------- bahis oranları ve harman tahmin ----------
@@ -1086,7 +1097,7 @@ function bultenView(){
   if(!B||B.st==="loading")return h+empty("Bülten yükleniyor","Seçili liglerdeki maçlar ve sezon verileri alınıyor.");
   if(B.st==="err"&&(FB.on||FB.daily))return h+empty("Bülten şu an kullanılamıyor","API-Football’un günlük istek hakkı bitti. Bülten, oranlar ve maç öncesi veriler hakkın yenilendiği "+resetTime()+" sonrasında gelir. Canlı skorlar yedek kaynaktan devam ediyor.");
   if(B.st==="err")return h+empty("Bülten alınamadı",E(B.msg)+" Ayarlar’dan API anahtarını ve istek hakkını kontrol et.");
-  var list=B.items.filter(function(x){return B.demo||SET.lg.indexOf(x.lid)>-1});
+  var list=B.items.filter(function(x){return B.demo||SET.lg.indexOf(x.lid)>-1}).map(liveOver);
   var pr=function(x){return preOf(x)};
   if(S.bs==="gol")list.sort(function(a,b){var A=pr(a),C=pr(b);return (C?C.xg:-1)-(A?A.xg:-1)});
   else if(S.bs==="fav")list.sort(function(a,b){var A=pr(a),C=pr(b);return (C?Math.max(C.ph,C.pa):-1)-(A?Math.max(A.ph,A.pa):-1)});
@@ -1119,17 +1130,17 @@ function render(){
     }).join("")+'</div>':empty("Henüz uyarı yok","Canlı bir maçı takibe al. Gol, kart ve penaltı ihtimali yükselince burada görünür.","Maçlar","Maçlara git");
   }else if(S.tab==="Kayıt"){
     var ST={w:["Bekliyor","w"],y:["Oldu","y"],n:["Olmadı","n"],"?":["Doğrulanamadı","q"]};
-    var dn=S.pr.filter(function(r){return r.st==="y"||r.st==="n"}),ht=dn.filter(function(r){return r.st==="y"}).length;
+    var PU=prUniq(),dn=PU.filter(function(r){return r.st==="y"||r.st==="n"}),ht=dn.filter(function(r){return r.st==="y"}).length;
     if(!S.pr.length)h=recLine()+empty("Henüz canlı tahmin kaydı yok","Takip ettiğin canlı maçlarda tahmin uyarısı gelince burada kaydedilir.","Maçlar","Maçlara git")+'<div style="height:14px"></div>'+scoreCard();
     else{
       h='<div class="sec"><h2>Tahmin kaydı</h2><span>'+(dn.length?'isabet '+pct(ht/dn.length)+' (%'+wil(ht,dn.length)+')':'')+'</span></div>'+recLine();
-      h+='<div class="kpi"><div><b>'+S.pr.length+'</b><span>Tahmin</span></div><div><b style="color:var(--ok)">'+ht+'</b><span>Tuttu</span></div><div><b>'+(dn.length-ht)+'</b><span>Tutmadı</span></div></div>';
+      h+='<div class="kpi"><div><b>'+PU.length+'</b><span>Tahmin</span></div><div><b style="color:var(--ok)">'+ht+'</b><span>Tuttu</span></div><div><b>'+(dn.length-ht)+'</b><span>Tutmadı</span></div></div>';
       h+=modelCard()+scoreCard()+'<div class="cal"><div class="bh"><h4>Bülten modeli</h4><span>maç öncesi</span></div><p class="an">2015/16 sezonunda 1.397 maçta, her maç yalnızca öncesindeki maçlarla tahmin edilerek test edildi. Maç sonucu (1-X-2) tahmini lig ortalamasına göre %5,6 daha isabetli. Modelin en net favori gördüğü maçların (en üst çeyrek) %68’ini favori kazandı. En gollü görülen %20’lik dilimde maç başı 3,0 gol, en az gollü dilimde 2,5 gol atıldı. 2,5 üst ve KG olasılıkları ise neredeyse yazı tura seviyesinde.</p></div>';
       h+='<div class="cal"><div class="bh"><h4>Kayıtlara göre ayar</h4><span>'+(SET.cal?'otomatik açık':'otomatik kapalı')+'</span></div><table><tr><th>Tür</th><th>Kayıt</th><th>Tahmin</th><th>Gerçek</th><th>Katsayı</th></tr>';
       ["g","c","p"].forEach(function(k){var c=CAL[k];
         h+='<tr><td>'+KL[k]+'</td><td>'+c.n+'</td><td>'+(c.n?pct(c.ap):'–')+'</td><td>'+(c.n?pct(c.h/c.n)+'<br><small class="an">%'+wil(c.h,c.n)+'</small>':'–')+'</td><td>'+(c.on?'×'+c.f.toFixed(2):c.n+'/20')+'</td></tr>'});
       h+='</table><p class="an" style="margin-top:10px">Bir türde 20 doğrulanmış kayıt birikince olasılıklar gerçekleşen orana göre ölçeklenir. Az kayıtla sonuçlar yanıltıcı olabilir; 50 ve üzeri daha güvenilir. Küçük yazılı aralık, gerçek oranın %95 ihtimalle bulunduğu aralıktır; kayıt arttıkça daralır.</p></div>';
-      h+='<div class="lh"><span>Son tahminler</span>'+(SRV&&STOK?'':'<button class="lnk" id="clr">Temizle</button>')+'</div><div class="rows">'+prSorted().slice(0,150).map(function(r){var t=ST[r.st]||ST["?"];
+      h+='<div class="lh"><span>Son tahminler</span>'+(SRV&&STOK?'':'<button class="lnk" id="clr">Temizle</button>')+'</div><div class="rows">'+PU.slice(0,150).map(function(r){var t=ST[r.st]||ST["?"];
         return '<div class="al"><div class="mn">'+r.m+'’</div><div><div class="mt">'+E(r.n)+(r.dv&&r.dv!==DEV?' <small class="an">· diğer telefon</small>':'')+'</div><div class="tx">'+E(r.tm)+', '+KL[r.k].toLowerCase()+' ihtimali '+pct(r.p)+'</div></div><div class="rs '+t[1]+'">'+t[0]+'</div></div>';
       }).join("")+'</div>';
     }
@@ -1220,6 +1231,7 @@ function infoAge(){
 setInterval(infoAge,5000);
 function prob(m,s,add){
   if(S.tr.indexOf(m.id)<0||s.m>=88||s.hs===false)return;
+  if(s.st&&["HT","BT","P","INT","SUSP"].indexOf(s.st)>-1)return; // devre arasında dakika 45'te donar; uyarı üretme
   var p=predict(s,m.id),nm=[m.h,m.a];
   [["g","gol atma ihtimali","tg",function(i){return s.sc[i]}],
    ["c","kart görme ihtimali","tc",function(i){return s.ca[i]}],
@@ -1239,8 +1251,11 @@ function resolve(){
   var add=[],ch=false;
   S.pr.forEach(function(r){
     if(r.st!=="w"||(r.dv&&r.dv!==DEV))return; // diğer telefonun tahminini o telefon doğrular
+    if(recOk(r)!==LIVE)return; // demo saati gerçek maç kaydına, canlı veri demo kaydına dokunmaz
     var s=S.lv[r.mid],cur=null,st0=r.st;
-    if(!s){r.st="?";ch=true;recDirty("pr",r.id);return}
+    if(!s){ // maç listede yok: ancak yeterince zaman geçtiyse (devre arası dahil) doğrulanamadı say
+      if(LASTOK&&Date.now()-prT(r)>((r.end-r.m)+25)*60e3){r.st="?";ch=true;recDirty("pr",r.id)}
+      return}
     if(r.k==="g")cur=s.sc[r.ti];else if(r.k==="c")cur=s.ca[r.ti];else cur=s.pn?s.pn[r.ti]:null;
     if(r.b==null||cur==null){if(s.m>=r.end){r.st="?";ch=true;recDirty("pr",r.id)}return}
     if(cur>r.b){r.st="y";ch=true;add.push({n:r.n,m:s.m,x:"✓ Tahmin tuttu: "+r.tm+" "+KL[r.k].toLowerCase()+" (tahmin "+pct(r.p)+")"})}
@@ -1553,7 +1568,9 @@ async function poll(){
       var id=String(f.fixture.id),old=S.lv[id],sv=HIST[id];
       var m={id:id,h:f.teams.home.name,a:f.teams.away.name,hid:f.teams.home.id,aid:f.teams.away.id,hl:f.teams.home.logo,al:f.teams.away.logo,lid:f.league.id,se:f.league.season,lg:f.league.country+" • "+f.league.name,t:"",live:1,hf:"",af:"",an:""};
       var om=M.filter(function(x){return x.id===id})[0];if(om){m.hf=om.hf;m.af=om.af}
-      var c=blank();c.m=f.fixture.status.elapsed||0;c.sc=[f.goals.home||0,f.goals.away||0];c.hs=false;
+      var c=blank();c.m=f.fixture.status.elapsed||0;c.sc=[f.goals.home||0,f.goals.away||0];c.hs=false;c.st=f.fixture.status.short||"";
+      // penaltı sayısı olaylardan (atılan + kaçan); olay listesi yoksa penaltı tahmini doğrulanamaz
+      if(Array.isArray(f.events)){c.pn=[0,0];f.events.forEach(function(e){if((e.type==="Goal"&&/penalty/i.test(e.detail||"")&&!/missed/i.test(e.detail||""))||/missed penalty/i.test(e.detail||"")){c.pn[e.team&&e.team.id===f.teams.away.id?1:0]++}})}else c.pn=null;
       if(old){c.hist=old.hist;c.goals=old.goals;if(old.hs){["sh","ot","sib","co","ca","fo","rc"].forEach(function(k){c[k]=old[k]});c.po=old.po;c.hs=true;c.at=old.at}}
       else if(sv&&Date.now()-sv.t<3*36e5){c.hist=sv.hist||[];c.goals=sv.goals||[]}
       if(old&&(c.sc[0]!==old.sc[0]||c.sc[1]!==old.sc[1])){
@@ -1587,6 +1604,7 @@ async function poll(){
     if(o.rem!=null&&o.rem!=="")REM=+o.rem;else if(REM!=null)REM=Math.max(0,REM-1);
     info("Canlı"+(o.fb?" (yedek: GOAL API)":"")+" • "+nm.length+" maç • "+(REM!=null&&REM>1500?"15 sn":"60 sn")+" • "+(o.fb?"API-Football günlük hakkı bitti, "+resetTime()+"’te yenilenir":(REM!=null?REM:"?")+" istek"));
     render();
+    if(S.tab==="Bülten")loadBulten(S.bd); // bülten açıkken durumları periyodik tazele
     S.ex.forEach(function(id){if(nl[id])loadLiveOdds(id)});
     S.ex.concat(S.tr).filter(function(id,i,a){return a.indexOf(id)===i}).forEach(function(id){
       stats(id);var mm=M.filter(function(x){return x.id===id})[0];if(mm)loadPrior(mm);
@@ -1599,7 +1617,8 @@ var REM=null,PT=null,QT=0,PLAN="";
 async function quota(){
   if(Date.now()-QT<10*60e3)return;QT=Date.now();
   try{var o=await apiJ("/status"),r=o.j.response;if(Array.isArray(r))r=r[0];
-    if(r&&r.requests&&r.requests.limit_day){REM=r.requests.limit_day-r.requests.current;PLAN=(r.subscription&&r.subscription.plan)||""}}catch(e){}
+    if(r&&r.requests&&r.requests.limit_day){REM=r.requests.limit_day-r.requests.current;PLAN=(r.subscription&&r.subscription.plan)||"";
+      if(PL&&(r.requests.limit_day>100||(PLAN&&!/free/i.test(PLAN)))){PL=0;save("mr_planlock",0);Object.keys(S.bl).forEach(function(k){if(S.bl[k].warn)delete S.bl[k]})}}}catch(e){}
 }
 function schedulePoll(){clearTimeout(PT);quota();var fast=REM!=null&&REM>1500;PT=setTimeout(function(){poll().then(schedulePoll,schedulePoll)},fast?15000:60000)}
 function startLive(){
