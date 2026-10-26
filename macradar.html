@@ -820,11 +820,13 @@ function mtype(nm){
   nm=String(nm||"").toLowerCase();
   var half=/first half|1st half|half time|halftime/.test(nm),second=/second half|2nd half/.test(nm),team=/home|away|team total|team -/.test(nm);
   if(second)return null;
+  // korner, kart, uzatma, penaltı, handikap vb. bahisler gol pazarı değildir (ör. "Corners Over Under" gol alt/üstü sanılmasın)
+  if(/corner|card|booking|extra time|penalt|offside|shot|foul|throw|handicap|asian|minute|interval|player|scorer|clean sheet|odd\/even/.test(nm))return null;
   if(/ht\/ft|half time\/full time|halftime\/fulltime/.test(nm))return "htft";
   if(/winner|1x2|full ?time result|match result/.test(nm))return half?"ht1x2":"1x2";
   if(/double chance/.test(nm))return half?null:"dc";
   if(/both teams/.test(nm))return half?null:"btts";
-  if(/over\/under|over under|total goals|goals over/.test(nm)&&!team)return half?"htou":"ou";
+  if(/goal/.test(nm)&&/over\/under|over under|total/.test(nm)&&!team)return half?"htou":"ou";
   return null;
 }
 function vkey(t,v){
@@ -851,7 +853,7 @@ function parseOdds0(bms){
       var vals={};(b.values||[]).forEach(function(v){var k=vkey(t,v.value),o=parseFloat(v.odd);if(k&&o>1)vals[k]=o});
       var groups=[];
       if(t==="ou"||t==="htou"){var lines={};Object.keys(vals).forEach(function(k){var L=k.slice(1);(lines[L]=lines[L]||{})[k[0]]=vals[k]});
-        Object.keys(lines).forEach(function(L){if(lines[L].O&&lines[L].U)groups.push([t+L,lines[L]])})}
+        Object.keys(lines).forEach(function(L){if(lines[L].O&&lines[L].U&&+L<=(t==="htou"?3.5:6.5)&&/\.5$/.test(L))groups.push([t+L,lines[L]])})}
       else if(t==="dc"){groups.push([t,vals])}
       else groups.push([t,vals]);
       groups.forEach(function(g){
@@ -872,13 +874,13 @@ function parseOdds0(bms){
 async function loadOdds(x){
   if(OD[x.id]&&OD[x.id].st!=="err")return;
   if(!LIVE||x.demoSR){var P=preOf(x);OD[x.id]=P?{st:"ok",demo:true,d:demoOdds(P)}:{st:"none"};render();return}
-  var c=cget("od_"+x.id,30*60e3);if(c){OD[x.id]={st:"ok",d:c};render();return}
+  var c=cget("od2_"+x.id,30*60e3);if(c){OD[x.id]={st:"ok",d:c};render();return}
   OD[x.id]={st:"loading"};render();
   try{
     var o=await apiJ("/odds?fixture="+x.id);
     if(o.j.errors&&Object.keys(o.j.errors).length)throw new Error(JSON.stringify(o.j.errors));
     var r=o.j.response&&o.j.response[0],d=parseOdds(r?r.bookmakers:[]);
-    cset("od_"+x.id,d);OD[x.id]={st:"ok",d:d};
+    cset("od2_"+x.id,d);OD[x.id]={st:"ok",d:d};
   }catch(e){OD[x.id]={st:"err",msg:String(e.message||e)}}
   render();
 }
@@ -925,7 +927,9 @@ function fitMarket(d){
 function fitMarket0(d){
   var m=d&&d.m;if(!m||!m["1x2"]||!m["1x2"].H||!m["1x2"].A)return null;
   var T={ph:m["1x2"].H.p,pa:m["1x2"].A.p,ou:{}};
-  Object.keys(m).forEach(function(k){if(/^ou[\d.]+$/.test(k)&&m[k].O)T.ou[k.slice(2)]=m[k].O.p});
+  Object.keys(m).forEach(function(k){if(/^ou[\d.]+$/.test(k)&&m[k].O&&+k.slice(2)<=5.5)T.ou[k.slice(2)]=m[k].O.p});
+  // alt/üst olasılıkları çizgi büyüdükçe azalmalı; tutarsız çizgi varsa (hatalı veri) atılır
+  var Ls=Object.keys(T.ou).sort(function(a,b){return a-b});for(var z=1;z<Ls.length;z++)if(T.ou[Ls[z]]>T.ou[Ls[z-1]]+.02){delete T.ou[Ls[z]];Ls.splice(z,1);z--}
   if(m.btts&&m.btts.Y)T.bt=m.btts.Y.p;
   var err=function(lh,la){
     var G=pgrid(lh,la,PRE_RHO,8),ph=0,pa=0,bt=0,ou={},e=0;
@@ -989,7 +993,7 @@ function vec(A){return A?[+A.ph.toFixed(4),+A.pd.toFixed(4),+A.pa.toFixed(4),+A.
 function recordBP(x,R){
   if(!R||FIN_ST.indexOf(x.st)>-1||LIVE_ST.indexOf(x.st)>-1||String(x.id).charAt(0)==="d")return;
   var e=S.bp[x.id]||{n:x.h+" - "+x.a,ts:x.ts},before=JSON.stringify(e);
-  e.m=vec(R.mod);if(R.mkt){e.k=vec(R.mkt);e.h=vec(R.har)}
+  e.m=vec(R.mod);if(R.mkt){e.k=vec(R.mkt);e.h=vec(R.har);e.kv=2}
   S.bp[x.id]=e;
   if(JSON.stringify(e)===before)return;recDirty("bp",x.id);
   var ks=Object.keys(S.bp);if(ks.length>1500)ks.sort(function(a,b){return S.bp[a].ts-S.bp[b].ts}).slice(0,ks.length-1500).forEach(function(k){delete S.bp[k]});
@@ -1003,7 +1007,7 @@ function resolveBP(items){
 function scoreCard(){
   var E_=Object.keys(S.bp).map(function(k){return S.bp[k]}).filter(function(e){return e.r});
   var src=[["m","Model"],["k","Piyasa"],["h","Harman"]],row=function(key,lab){
-    var L=E_.filter(function(e){return e[key]});if(!L.length)return '<tr><td>'+lab+'</td><td>0</td><td>–</td><td>–</td><td>–</td></tr>';
+    var L=E_.filter(function(e){return e[key]&&(key==="m"||e.kv===2)}); // kv2 öncesi oran kayıtları korner/kart hatası içerebilirif(!L.length)return '<tr><td>'+lab+'</td><td>0</td><td>–</td><td>–</td><td>–</td></tr>';
     var hit=0,ll=0,o25=0,bs=0;
     L.forEach(function(e){var v=e[key],g=e.r,res=g[0]>g[1]?0:g[0]===g[1]?1:2,arg=[v[0],v[1],v[2]].indexOf(Math.max(v[0],v[1],v[2]));
       if(arg===res)hit++;ll+=-Math.log(Math.max(v[res],1e-6));var y=g[0]+g[1]>2.5?1:0;if((v[3]>=.5?1:0)===y)o25++;bs+=(v[3]-y)*(v[3]-y)});
@@ -1031,7 +1035,7 @@ function fxCard(x){
   }else if(open)h+=anaBlock(x,R||{});
   else h+='<p class="an" style="margin-bottom:14px">'+(LIVE&&!SRC[x.lid+"_"+x.se]&&!(S.bl[dstr(S.bd)]||{}).warn?'Sezon verisi yükleniyor…':'Model için sezon verisi yok. Bahis oranlarına göre tahmin için Analiz’i aç.')+'</p>';
   var anb='<button class="btn sm" data-a="an" data-id="'+E(x.id)+'">'+(open?'Gizle':'Analiz')+'</button>';
-  if(fin&&S.bp[x.id]&&S.bp[x.id].r&&(S.bp[x.id].h||S.bp[x.id].m))h+=resultLine(x);
+  if(fin&&S.bp[x.id]&&S.bp[x.id].r&&((S.bp[x.id].h&&S.bp[x.id].kv===2)||S.bp[x.id].m))h+=resultLine(x);
   if(fin)h+='<div class="act">'+anb+'</div>';
   else h+='<div class="act">'+(live?'<button class="btn'+(tr?'':' pri')+'" data-a="tr" data-id="'+E(x.id)+'">'+(tr?'Takipte':'Canlı, takibe al')+'</button>':'<button class="btn'+(watched?'':' pri')+'" data-a="wt" data-id="'+E(x.id)+'">'+(watched?'Başlayınca takip edilecek':'Başlayınca takip et')+'</button>')+anb+'</div>';
   return h+'</article>';
@@ -1072,8 +1076,8 @@ function anaBlock(x,R){
   return h+'</div>';
 }
 function resultLine(x){
-  var e=S.bp[x.id],v=e.h||e.m,g=e.r,res=g[0]>g[1]?0:g[0]===g[1]?1:2,arg=[v[0],v[1],v[2]].indexOf(Math.max(v[0],v[1],v[2])),o=(g[0]+g[1]>2.5)===(v[3]>=.5);
-  return '<p class="an" style="margin-bottom:12px">Maç öncesi tahmin ('+(e.h?'harman':'model')+'): '+["1","X","2"][arg]+' '+pct(v[arg])+' '+(arg===res?'✓':'✗')+' · 2,5 '+(v[3]>=.5?'üst':'alt')+' '+(o?'✓':'✗')+(g[2]!=null?' · İY '+g[2]+'-'+g[3]:'')+'</p>';
+  var e=S.bp[x.id],v=(e.kv===2&&e.h)||e.m,g=e.r,res=g[0]>g[1]?0:g[0]===g[1]?1:2,arg=[v[0],v[1],v[2]].indexOf(Math.max(v[0],v[1],v[2])),o=(g[0]+g[1]>2.5)===(v[3]>=.5);
+  return '<p class="an" style="margin-bottom:12px">Maç öncesi tahmin ('+(e.kv===2&&e.h?'oranlar':'model')+'): '+["1","X","2"][arg]+' '+pct(v[arg])+' '+(arg===res?'✓':'✗')+' · 2,5 '+(v[3]>=.5?'üst':'alt')+' '+(o?'✓':'✗')+(g[2]!=null?' · İY '+g[2]+'-'+g[3]:'')+'</p>';
 }
 function bultenView(){
   var ds=dstr(S.bd),B=S.bl[ds],h='<div class="segs"><div class="seg">';
