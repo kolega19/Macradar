@@ -42,6 +42,7 @@ header{position:sticky;top:0;z-index:10;background:rgba(7,8,10,.92);-webkit-back
 .wm small{display:block;margin-top:4px;font-size:12px;color:var(--mu);font-weight:600}
 #info:before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--mu2);margin-right:6px;vertical-align:1px}
 #info[data-live="1"]:before{background:var(--ok)}
+#info[data-old="1"]:before{background:var(--no)}
 .ib{width:42px;height:42px;border-radius:12px;border:1px solid var(--line2);background:var(--s1);display:grid;place-items:center;flex:none}
 .ib svg{width:20px;height:20px}
 
@@ -459,9 +460,11 @@ function predictSimple(s,mid){
   out.fouls=(s.m>=15?(s.fo[0]+s.fo[1])/mn:.26)*5;
   return out;
 }
+function prT(r){return r.t||parseInt(r.id,10)||0}
+function prSorted(){return S.pr.slice().sort(function(a,b){return prT(b)-prT(a)})}
 function calcCal(){
   ["g","c","p"].forEach(function(k){
-    var mk=MKEY(),hz=HZ(),d=S.pr.filter(function(r){return r.k===k&&(r.mdl||"simple")===mk&&(r.hz||"5")===hz&&(r.st==="y"||r.st==="n")}).slice(0,200);
+    var mk=MKEY(),hz=HZ(),d=prSorted().filter(function(r){return r.k===k&&(r.mdl||"simple")===mk&&(r.hz||"5")===hz&&(r.st==="y"||r.st==="n")}).slice(0,200);
     var n=d.length,h=d.filter(function(r){return r.st==="y"}).length;
     var ap=n?d.reduce(function(a,r){return a+(r.p0!=null?r.p0:r.p)},0)/n:0;
     var f=n&&ap?clamp((h/n)/ap,.5,2):1;
@@ -985,15 +988,16 @@ function liveOddsBlock(m){
 function vec(A){return A?[+A.ph.toFixed(4),+A.pd.toFixed(4),+A.pa.toFixed(4),+A.ou["2.5"].toFixed(4),+A.bt.toFixed(4),+A.ht.o05.toFixed(4)]:null}
 function recordBP(x,R){
   if(!R||FIN_ST.indexOf(x.st)>-1||LIVE_ST.indexOf(x.st)>-1||String(x.id).charAt(0)==="d")return;
-  var e=S.bp[x.id]||{n:x.h+" - "+x.a,ts:x.ts};
+  var e=S.bp[x.id]||{n:x.h+" - "+x.a,ts:x.ts},before=JSON.stringify(e);
   e.m=vec(R.mod);if(R.mkt){e.k=vec(R.mkt);e.h=vec(R.har)}
   S.bp[x.id]=e;
-  var ks=Object.keys(S.bp);if(ks.length>400)ks.sort(function(a,b){return S.bp[a].ts-S.bp[b].ts}).slice(0,ks.length-400).forEach(function(k){delete S.bp[k]});
+  if(JSON.stringify(e)===before)return;recDirty("bp",x.id);
+  var ks=Object.keys(S.bp);if(ks.length>1500)ks.sort(function(a,b){return S.bp[a].ts-S.bp[b].ts}).slice(0,ks.length-1500).forEach(function(k){delete S.bp[k]});
   save("mr_bp",S.bp);
 }
 function resolveBP(items){
   var ch=false;
-  items.forEach(function(x){var e=S.bp[x.id];if(e&&!e.r&&FIN_ST.indexOf(x.st)>-1&&x.gh!=null){e.r=[x.gh,x.ga,x.hh,x.ha];ch=true}});
+  items.forEach(function(x){var e=S.bp[x.id];if(e&&!e.r&&FIN_ST.indexOf(x.st)>-1&&x.gh!=null){e.r=[x.gh,x.ga,x.hh,x.ha];ch=true;recDirty("bp",x.id)}});
   if(ch)save("mr_bp",S.bp);
 }
 function scoreCard(){
@@ -1112,17 +1116,17 @@ function render(){
   }else if(S.tab==="Kayıt"){
     var ST={w:["Bekliyor","w"],y:["Oldu","y"],n:["Olmadı","n"],"?":["Doğrulanamadı","q"]};
     var dn=S.pr.filter(function(r){return r.st==="y"||r.st==="n"}),ht=dn.filter(function(r){return r.st==="y"}).length;
-    if(!S.pr.length)h=empty("Henüz canlı tahmin kaydı yok","Takip ettiğin canlı maçlarda tahmin uyarısı gelince burada kaydedilir.","Maçlar","Maçlara git")+'<div style="height:14px"></div>'+scoreCard();
+    if(!S.pr.length)h=recLine()+empty("Henüz canlı tahmin kaydı yok","Takip ettiğin canlı maçlarda tahmin uyarısı gelince burada kaydedilir.","Maçlar","Maçlara git")+'<div style="height:14px"></div>'+scoreCard();
     else{
-      h='<div class="sec"><h2>Tahmin kaydı</h2><span>'+(dn.length?'isabet '+pct(ht/dn.length):'')+'</span></div>';
+      h='<div class="sec"><h2>Tahmin kaydı</h2><span>'+(dn.length?'isabet '+pct(ht/dn.length)+' (%'+wil(ht,dn.length)+')':'')+'</span></div>'+recLine();
       h+='<div class="kpi"><div><b>'+S.pr.length+'</b><span>Tahmin</span></div><div><b style="color:var(--ok)">'+ht+'</b><span>Tuttu</span></div><div><b>'+(dn.length-ht)+'</b><span>Tutmadı</span></div></div>';
       h+=modelCard()+scoreCard()+'<div class="cal"><div class="bh"><h4>Bülten modeli</h4><span>maç öncesi</span></div><p class="an">2015/16 sezonunda 1.397 maçta, her maç yalnızca öncesindeki maçlarla tahmin edilerek test edildi. Maç sonucu (1-X-2) tahmini lig ortalamasına göre %5,6 daha isabetli. Modelin en net favori gördüğü maçların (en üst çeyrek) %68’ini favori kazandı. En gollü görülen %20’lik dilimde maç başı 3,0 gol, en az gollü dilimde 2,5 gol atıldı. 2,5 üst ve KG olasılıkları ise neredeyse yazı tura seviyesinde.</p></div>';
       h+='<div class="cal"><div class="bh"><h4>Kayıtlara göre ayar</h4><span>'+(SET.cal?'otomatik açık':'otomatik kapalı')+'</span></div><table><tr><th>Tür</th><th>Kayıt</th><th>Tahmin</th><th>Gerçek</th><th>Katsayı</th></tr>';
       ["g","c","p"].forEach(function(k){var c=CAL[k];
-        h+='<tr><td>'+KL[k]+'</td><td>'+c.n+'</td><td>'+(c.n?pct(c.ap):'–')+'</td><td>'+(c.n?pct(c.h/c.n):'–')+'</td><td>'+(c.on?'×'+c.f.toFixed(2):c.n+'/20')+'</td></tr>'});
-      h+='</table><p class="an" style="margin-top:10px">Bir türde 20 doğrulanmış kayıt birikince olasılıklar gerçekleşen orana göre ölçeklenir. Az kayıtla sonuçlar yanıltıcı olabilir; 50 ve üzeri daha güvenilir.</p></div>';
-      h+='<div class="lh"><span>Son tahminler</span><button class="lnk" id="clr">Temizle</button></div><div class="rows">'+S.pr.map(function(r){var t=ST[r.st]||ST["?"];
-        return '<div class="al"><div class="mn">'+r.m+'’</div><div><div class="mt">'+E(r.n)+'</div><div class="tx">'+E(r.tm)+', '+KL[r.k].toLowerCase()+' ihtimali '+pct(r.p)+'</div></div><div class="rs '+t[1]+'">'+t[0]+'</div></div>';
+        h+='<tr><td>'+KL[k]+'</td><td>'+c.n+'</td><td>'+(c.n?pct(c.ap):'–')+'</td><td>'+(c.n?pct(c.h/c.n)+'<br><small class="an">%'+wil(c.h,c.n)+'</small>':'–')+'</td><td>'+(c.on?'×'+c.f.toFixed(2):c.n+'/20')+'</td></tr>'});
+      h+='</table><p class="an" style="margin-top:10px">Bir türde 20 doğrulanmış kayıt birikince olasılıklar gerçekleşen orana göre ölçeklenir. Az kayıtla sonuçlar yanıltıcı olabilir; 50 ve üzeri daha güvenilir. Küçük yazılı aralık, gerçek oranın %95 ihtimalle bulunduğu aralıktır; kayıt arttıkça daralır.</p></div>';
+      h+='<div class="lh"><span>Son tahminler</span>'+(SRV&&STOK?'':'<button class="lnk" id="clr">Temizle</button>')+'</div><div class="rows">'+prSorted().slice(0,150).map(function(r){var t=ST[r.st]||ST["?"];
+        return '<div class="al"><div class="mn">'+r.m+'’</div><div><div class="mt">'+E(r.n)+(r.dv&&r.dv!==DEV?' <small class="an">· diğer telefon</small>':'')+'</div><div class="tx">'+E(r.tm)+', '+KL[r.k].toLowerCase()+' ihtimali '+pct(r.p)+'</div></div><div class="rs '+t[1]+'">'+t[0]+'</div></div>';
       }).join("")+'</div>';
     }
   }else if(S.tab==="Takip"){
@@ -1202,7 +1206,14 @@ async function wake(){
 document.addEventListener("visibilitychange",wake);
 
 /* ---------- tahmin ve doğrulama ---------- */
-function info(t){var e=$("info");e.textContent=t;e.dataset.live=t.indexOf("Canlı")===0?"1":"0"}
+var INFO_T="",LASTOK=0;
+function info(t){INFO_T=t;if(t.indexOf("Canlı")===0)LASTOK=Date.now();infoAge()}
+function infoAge(){
+  var e=$("info"),live=INFO_T.indexOf("Canlı")===0,a=LASTOK?Math.round((Date.now()-LASTOK)/1000):null,old=LIVE&&a!=null&&a>150;
+  e.textContent=(old?"Veri "+Math.round(a/60)+" dk eski, yenilenemiyor":INFO_T)+(live&&a!=null&&!old?" • "+(a<5?"az önce":a<60?a+" sn önce":Math.floor(a/60)+" dk önce"):"");
+  e.dataset.live=live&&!old?"1":"0";e.dataset.old=old?"1":"0";
+}
+setInterval(infoAge,5000);
 function prob(m,s,add){
   if(S.tr.indexOf(m.id)<0||s.m>=88||s.hs===false)return;
   var p=predict(s,m.id),nm=[m.h,m.a];
@@ -1214,8 +1225,8 @@ function prob(m,s,add){
       if(pc>=TH[k[0]]&&!(PS[key]!=null&&s.m-PS[key]<10)){
         PS[key]=s.m;
         add.push({n:m.h+" - "+m.a,m:s.m,x:"⚠ "+nm[i]+" "+k[1]+" "+pct(pc)+" (önümüzdeki "+WIN()+" dk)"});
-        S.pr.unshift({id:Date.now()+"-"+key,mid:m.id,n:m.h+" - "+m.a,m:s.m,end:Math.min(s.m+WIN()+(HZ()==="d"?1:0),90),hz:HZ(),k:k[0],ti:i,tm:nm[i],p:pc,p0:p.raw[k[2]][i],mdl:p.model,b:k[3](i),st:"w"});
-        S.pr=S.pr.slice(0,400);save("mr_pr",S.pr);
+        S.pr.unshift({id:Date.now()+"-"+key,t:Date.now(),dv:DEV,lv:LIVE?1:0,mid:m.id,n:m.h+" - "+m.a,m:s.m,end:Math.min(s.m+WIN()+(HZ()==="d"?1:0),90),hz:HZ(),k:k[0],ti:i,tm:nm[i],p:pc,p0:p.raw[k[2]][i],mdl:p.model,b:k[3](i),st:"w"});
+        S.pr=S.pr.slice(0,1500);save("mr_pr",S.pr);recDirty("pr",S.pr[0].id);
       }
     });
   });
@@ -1223,13 +1234,14 @@ function prob(m,s,add){
 function resolve(){
   var add=[],ch=false;
   S.pr.forEach(function(r){
-    if(r.st!=="w")return;
-    var s=S.lv[r.mid],cur=null;
-    if(!s){r.st="?";ch=true;return}
+    if(r.st!=="w"||(r.dv&&r.dv!==DEV))return; // diğer telefonun tahminini o telefon doğrular
+    var s=S.lv[r.mid],cur=null,st0=r.st;
+    if(!s){r.st="?";ch=true;recDirty("pr",r.id);return}
     if(r.k==="g")cur=s.sc[r.ti];else if(r.k==="c")cur=s.ca[r.ti];else cur=s.pn?s.pn[r.ti]:null;
-    if(r.b==null||cur==null){if(s.m>=r.end){r.st="?";ch=true}return}
+    if(r.b==null||cur==null){if(s.m>=r.end){r.st="?";ch=true;recDirty("pr",r.id)}return}
     if(cur>r.b){r.st="y";ch=true;add.push({n:r.n,m:s.m,x:"✓ Tahmin tuttu: "+r.tm+" "+KL[r.k].toLowerCase()+" (tahmin "+pct(r.p)+")"})}
     else if(s.m>=r.end){r.st="n";ch=true}
+    if(r.st!==st0)recDirty("pr",r.id);
   });
   if(ch){save("mr_pr",S.pr);calcCal()}
   if(add.length){S.al=add.reverse().concat(S.al).slice(0,60);save("mr_al",S.al);notify(false)}
@@ -1280,7 +1292,11 @@ async function srvConnect(){
     var h=await (await fetch(u+"/health")).json();if(!h.ok)throw new Error("Sunucu yanıtı beklenmedik");
     SRV=u;STOK=t;var i=await srvCall("/info");
     save("mr_srv",u);save("mr_stok",t);
-    srvStatus("Bağlandı ✓ · kayıtlı cihaz: "+i.devices+(i.err?" · son hata: "+i.err:""));
+    var fresh=i.err&&(!i.errAt||Date.now()-i.errAt<30*60e3)&&!(i.okAt&&i.okAt>i.errAt);
+    srvStatus("Bağlandı ✓ · kayıtlı cihaz: "+i.devices+
+      (i.db?(i.db.err?" · veritabanı hatası: "+i.db.err:" · ortak kayıt: "+i.db.rec+" kayıt, "+i.db.snapMatches+" maçın dakika verisi"):" · ortak kayıt kapalı (sunucuya D1 bağlanmamış)")+
+      (fresh?" · son hata ("+(i.errAt?hm(i.errAt):"?")+"): "+i.err:""));
+    recSync();
     return true;
   }catch(e){srvStatus("Bağlanılamadı: "+String(e.message||e));return false}
 }
@@ -1302,6 +1318,56 @@ async function pushOff(){
   try{if(SRV&&STOK)await srvCall("/unsub",{dev:DEV})}catch(e){}
   PUSH=false;save("mr_push",false);srvStatus();toast("Arka plan bildirimleri kapatıldı");
 }
+
+/* ---------- ortak kayıtlar (sunucudaki D1 veritabanı) ----------
+   Takip listesi ve ayarlar telefona özeldir. Canlı tahmin kayıtları ve bülten karnesi sunucuda birleşir;
+   kalibrasyon ve isabet tabloları iki telefonun toplam kaydından hesaplanır. */
+var RS=load("mr_rs",{since:0,init:false,t:0,err:null}),RD=load("mr_rd",{pr:{},bp:{}}),RST=null,RBUSY=false;
+function recOk(r){return r&&(r.lv===1||(r.lv==null&&/^(g.+|\d{5,})$/.test(String(r.mid))))}
+function recDirty(kind,id){if(!id)return;RD[kind][id]=1;save("mr_rd",RD);clearTimeout(RST);RST=setTimeout(recSync,4000)}
+function mergePr(list){
+  var ix={};S.pr.forEach(function(r,i){ix[r.id]=i});
+  list.forEach(function(r){if(!r||!r.id)return;var i=ix[r.id];
+    if(i==null){S.pr.push(r);ix[r.id]=S.pr.length-1}
+    else if(!(S.pr[i].dv===DEV&&r.dv===DEV))S.pr[i]=Object.assign({},S.pr[i],r); // kendi kaydımızda telefondaki hal esas
+  });
+  S.pr=prSorted().slice(0,1500);
+}
+function mergeBp(list){
+  list.forEach(function(e){if(!e||!e.id)return;var id=e.id,o=S.bp[id]||{},n=Object.assign({},o,e);delete n.id;if(o.r&&!e.r)n.r=o.r;S.bp[id]=n});
+}
+async function recSync(){
+  if(!SRV||!STOK||RBUSY)return;RBUSY=true;
+  try{
+    if(!RS.init){S.pr.forEach(function(r){if(recOk(r)){if(!r.dv)r.dv=DEV;RD.pr[r.id]=1}});Object.keys(S.bp).forEach(function(k){RD.bp[k]=1})}
+    var prL=S.pr.filter(function(r){return RD.pr[r.id]&&recOk(r)}),bpL=Object.keys(RD.bp).filter(function(k){return S.bp[k]}).map(function(k){return Object.assign({id:k},S.bp[k])});
+    for(var i=0;i<Math.max(prL.length,bpL.length);i+=300){
+      await srvCall("/rec",{dev:DEV,pr:prL.slice(i,i+300),bp:bpL.slice(i,i+300)});
+    }
+    RD={pr:{},bp:{}};save("mr_rd",RD);RS.init=true;
+    for(var k=0;k<10;k++){
+      var g=await srvCall("/rec?since="+(RS.since||0));
+      mergePr(g.pr||[]);mergeBp(g.bp||[]);RS.since=g.u||RS.since;
+      if(!g.more)break;
+    }
+    save("mr_pr",S.pr);save("mr_bp",S.bp);calcCal();
+    RS.t=Date.now();RS.err=null;save("mr_rs",RS);
+    if(S.tab==="Kayıt")render();
+  }catch(e){RS.err=String(e.message||e);save("mr_rs",RS);if(S.tab==="Kayıt")render()}
+  RBUSY=false;
+}
+function recLine(){
+  if(!SRV||!STOK)return '<p class="an" style="margin:-4px 2px 12px">Kayıtlar yalnızca bu telefonda. Sunucuya bağlanınca iki telefonun kayıtları ortak havuzda birleşir.</p>';
+  if(RS.err)return '<p class="an" style="margin:-4px 2px 12px;color:var(--no)">Ortak kayıt eşitlenemedi: '+E(RS.err)+'</p>';
+  if(!RS.t)return '<p class="an" style="margin:-4px 2px 12px">Ortak kayıtlar eşitleniyor…</p>';
+  var own=S.pr.filter(function(r){return r.dv===DEV}).length;
+  return '<p class="an" style="margin:-4px 2px 12px">Ortak kayıt: '+S.pr.length+' tahmin ('+own+' bu telefondan) · '+Object.keys(S.bp).length+' bülten maçı · son eşitleme '+hm(RS.t)+'</p>';
+}
+function hm(t){var d=new Date(t);return pad(d.getHours())+":"+pad(d.getMinutes())}
+// Wilson %95 aralığı: az kayıtta oranın ne kadar oynak olduğunu gösterir
+function wil(h,n){if(!n)return "";var z=1.96,p=h/n,d=1+z*z/n,c=(p+z*z/(2*n))/d,w=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;return Math.round(Math.max(0,c-w)*100)+"–"+Math.round(Math.min(1,c+w)*100)}
+setInterval(function(){if(document.visibilityState==="visible")recSync()},120000);
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")recSync()});
 
 /* ---------- yedek kaynak: GOAL API ----------
    API-Football günlük hakkı bitince (veya kota hatası verince) canlı maç listesi ve istatistikler GOAL API'den alınır.
@@ -1662,7 +1728,7 @@ setInterval(function(){
 },TICK);
 
 /* ---------- başlat ---------- */
-render();wake();
+render();wake();if(SRV&&STOK)setTimeout(recSync,3000);
 if(location.protocol.indexOf("http")===0&&"serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){})}
 fetch("/health").then(function(r){return r.json()}).then(function(j){
   if(j&&j.ok){startLive().then(schedulePoll)}

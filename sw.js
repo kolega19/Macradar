@@ -1,5 +1,5 @@
 // MaçRadar service worker: sayfayı çevrimdışı açar, canlı API'yi asla önbelleğe almaz.
-const C = "macradar-v5";
+const C = "macradar-v6";
 const CORE = ["macradar.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
