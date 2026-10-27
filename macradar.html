@@ -341,7 +341,7 @@ button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     <p>Tahmin aralığı: kaç dakika sonrasına kadarki olayların tahmin edileceği. "4 dk telafili", canlı verinin yaklaşık 1 dakika geç gelmesini hesaba katar ve şu andan itibaren 4 dakikayı hedefler.</p>
     <div class="seg" id="hzs" style="margin:4px 0 14px"><button data-hz="d">4 dk telafili</button><button data-hz="3">3 dk</button><button data-hz="4">4 dk</button><button data-hz="5">5 dk</button></div>
     <p>Uyarı, bir takımın ihtimali bu eşikleri geçince gelir. Varsayılan eşikler, geçmiş maçlarda modelin en yüksek ihtimal verdiği %10'luk dilimin başlangıcıdır. <button class="lnk" id="thr">Varsayılana dön</button></p>
-    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 27.10 · 1</p>
+    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 27.10 · 2</p>
     <div class="rg"><label>Gol eşiği <b id="vg"></b></label><input type="range" id="tg" min="2" max="30" step="0.5"></div>
     <div class="rg"><label>Kart eşiği <b id="vc"></b></label><input type="range" id="tc" min="2" max="40" step="0.5"></div>
     <div class="rg"><label>Penaltı eşiği <b id="vp"></b></label><input type="range" id="tp" min="0.5" max="10" step="0.1"></div>
@@ -392,8 +392,13 @@ try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}
 var SET=Object.assign({snd:true,vib:true,wl:true,cal:true,ml:true},load("mr_set",{}));
 var TH=Object.assign({g:.12,c:.13,p:.015},load("mr_th",{}));
 var S={tab:"Maçlar",f:"Tümü",q:"",ex:[],lv:{},tr:load("mr_tr",[]).slice(0,MAX),al:load("mr_al",[]),pr:load("mr_pr",[]),wt:load("mr_wt",[]),bd:0,bs:"saat",bl:{},an:[],bp:load("mr_bp",{})};
-var LG=[{id:203,n:"Süper Lig"},{id:204,n:"TFF 1. Lig"},{id:39,n:"Premier League"},{id:140,n:"La Liga"},{id:135,n:"Serie A"},{id:78,n:"Bundesliga"},{id:61,n:"Ligue 1"},{id:88,n:"Eredivisie"},{id:94,n:"Primeira Liga"},{id:2,n:"Şampiyonlar Ligi"},{id:3,n:"Avrupa Ligi"},{id:848,n:"Konferans Ligi"}];
+var LG=[{id:203,n:"Süper Lig"},{id:204,n:"TFF 1. Lig"},{id:39,n:"Premier League"},{id:140,n:"La Liga"},{id:135,n:"Serie A"},{id:78,n:"Bundesliga"},{id:61,n:"Ligue 1"},{id:88,n:"Eredivisie"},{id:94,n:"Primeira Liga"},{id:2,n:"Şampiyonlar Ligi"},{id:3,n:"Avrupa Ligi"},{id:848,n:"Konferans Ligi"},
+  {id:206,n:"Türkiye Kupası",c:1},{id:40,n:"Championship (İngiltere 2)"},{id:79,n:"2. Bundesliga"},{id:136,n:"Serie B"},{id:141,n:"La Liga 2"},{id:62,n:"Ligue 2"},
+  {id:144,n:"Belçika Pro Lig"},{id:179,n:"İskoçya Premiership"},{id:218,n:"Avusturya Bundesliga"},{id:207,n:"İsviçre Süper Lig"},{id:119,n:"Danimarka Superliga"},
+  {id:197,n:"Yunanistan Süper Lig"},{id:307,n:"Suudi Pro Lig"},{id:253,n:"MLS (ABD)"},{id:71,n:"Brezilya Serie A"},{id:128,n:"Arjantin Liga Profesional"}];
+var NEW_LG=[206,40,79,136,141,62,144,179,218,207,119,197,307,253,71,128];
 if(!SET.lg)SET.lg=[203,39,140,135,78,61,2];
+if(!SET.lgv){SET.lgv=2;NEW_LG.forEach(function(id){if(SET.lg.indexOf(id)<0)SET.lg.push(id)});save("mr_set",SET)} // yeni eklenen ligler bir kereye mahsus açılır
 // açılışta bekleyen gerçek maç tahminleri silinmez; canlı veri gelince doğrulanmaya devam eder (eskiden hepsi "doğrulanamadı" oluyordu)
 S.pr.forEach(function(r){if(r.st==="w"&&!(r.lv===1||(r.lv==null&&/^(g.+|\d{5,})$/.test(String(r.mid)))))r.st="?"});
 var PRI={}, FL={}, PS={}, LIVE=false, DIRECT=false, CAL={};
@@ -831,7 +836,7 @@ async function loadBulten(off){
       c=(o.j.response||[]).filter(function(f){return ids.indexOf(f.league.id)>-1}).map(function(f){return{id:String(f.fixture.id),ts:f.fixture.timestamp,st:f.fixture.status.short,el:f.fixture.status.elapsed,lid:f.league.id,se:f.league.season,lg:f.league.country+" • "+f.league.name,h:f.teams.home.name,a:f.teams.away.name,hid:f.teams.home.id,aid:f.teams.away.id,hl:f.teams.home.logo,al:f.teams.away.logo,gh:f.goals.home,ga:f.goals.away,hh:f.score&&f.score.halftime?f.score.halftime.home:null,ha:f.score&&f.score.halftime?f.score.halftime.away:null,gl:f.gl||null}});
       cset("fx_"+ds,c);
     }
-    var need={};c.forEach(function(x){if(SET.lg.indexOf(x.lid)>-1)need[x.lid+"_"+x.se]=[x.lid,x.se,x.gl]});
+    var need={},cup=LG.filter(function(l){return l.c}).map(function(l){return l.id});c.forEach(function(x){if(SET.lg.indexOf(x.lid)>-1&&cup.indexOf(x.lid)<0)need[x.lid+"_"+x.se]=[x.lid,x.se,x.gl]}); // kupada puan tablosu yok: tahmin oranlardan
     S.bl[ds]={st:"ok",items:c,t:Date.now()};resolveBP(c);render();
     for(var k in need){if(SRC[k])continue;try{await seasonRatings(need[k][0],need[k][1],need[k][2]);render()}catch(e){S.bl[ds].warn="Bazı liglerin sezon verisi alınamadı: "+String(e.message||e).slice(0,160)+". İstek sınırıysa biraz sonra yeniden açınca tamamlanır; plan kısıtıysa model yerine bahis oranları kullanılır (Analiz)."}}
     render();
@@ -1533,7 +1538,11 @@ function goalFixture(x){
 // GOAL API lig adlarını uygulamadaki liglerle eşleştir
 var LGPAT=[[203,/s[uü]per ?lig/i,/t[uü]rk/i],[204,/(^|\s)1\.? ?lig|tff/i,/t[uü]rk/i],[39,/^premier league$/i,/england|ingiltere/i],[140,/la ?liga|primera divisi/i,/spain|espa|ispanya/i],
   [135,/^serie a$/i,/ital/i],[78,/^bundesliga$/i,/german|deutsch|almanya/i],[61,/^ligue 1$/i,/france|fransa/i],[88,/eredivisie/i,null],[94,/primeira|liga portugal/i,/portug/i],
-  [2,/champions league/i,null],[3,/europa league/i,null],[848,/conference league/i,null]];
+  [2,/champions league/i,null],[3,/europa league/i,null],[848,/conference league/i,null],
+  [206,/cup|kupa/i,/t[uü]rk/i],[40,/championship/i,/england|ingiltere/i],[79,/2\. ?bundesliga/i,/german|deutsch|almanya/i],[136,/^serie b$/i,/ital/i],[141,/segunda|la ?liga 2|hypermotion/i,/spain|espa|ispanya/i],
+  [62,/^ligue 2$/i,/france|fransa/i],[144,/pro league|jupiler|first division a/i,/belg/i],[179,/premiership/i,/scot|iskoç/i],[218,/bundesliga/i,/austria|avusturya/i],
+  [207,/super league/i,/switz|isviçre/i],[119,/superliga/i,/denmark|danimarka/i],[197,/super league/i,/greece|yunan/i],[307,/pro league|saudi/i,/saudi|suudi/i],
+  [253,/^mls$|major league soccer/i,/usa|united states|abd/i],[71,/serie a/i,/brazil|brezilya/i],[128,/liga profesional|primera divisi/i,/argentin/i]];
 function lgMatch(name,country){
   name=String(name||"").trim();country=String(country||"");
   if(/women|kad[iı]n|u-?\d\d|youth|afc|caf|concacaf/i.test(name))return null;
