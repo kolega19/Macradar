@@ -187,6 +187,12 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:10;background:rgba(7,8,10,.94
 .al.pk.on .pp small{color:var(--ok)}
 .al.pk.on{background:linear-gradient(90deg,rgba(0,157,224,.10),transparent)}
 .kup{border-color:rgba(0,157,224,.45)}
+.kc .kl{display:grid;grid-template-columns:62px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.kc .kl span{color:var(--mu);font-weight:700;font-size:12px}
+.kc .kl small{display:block;color:var(--mu2);font-size:12px;margin-top:2px}
+.kc .kl em{font:800 15px var(--disp);color:var(--blue);font-style:normal}
+.tag.kr{background:rgba(52,199,89,.14);color:#34C759}
+.tag.kt{background:rgba(255,204,0,.14);color:#FFCC00}
 .bar3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:12px}
 .bar3>div{min-width:0;background:var(--s2);border-radius:12px;padding:10px 8px;text-align:center}
 .bar3 span{display:block;font-size:12px;color:var(--mu);font-weight:700;margin-bottom:4px}
@@ -341,7 +347,7 @@ button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     <p>Tahmin aralığı: kaç dakika sonrasına kadarki olayların tahmin edileceği. "4 dk telafili", canlı verinin yaklaşık 1 dakika geç gelmesini hesaba katar ve şu andan itibaren 4 dakikayı hedefler.</p>
     <div class="seg" id="hzs" style="margin:4px 0 14px"><button data-hz="d">4 dk telafili</button><button data-hz="3">3 dk</button><button data-hz="4">4 dk</button><button data-hz="5">5 dk</button></div>
     <p>Uyarı, bir takımın ihtimali bu eşikleri geçince gelir. Varsayılan eşikler, geçmiş maçlarda modelin en yüksek ihtimal verdiği %10'luk dilimin başlangıcıdır. <button class="lnk" id="thr">Varsayılana dön</button></p>
-    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 27.10 · 2</p>
+    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 28.10 · 1</p>
     <div class="rg"><label>Gol eşiği <b id="vg"></b></label><input type="range" id="tg" min="2" max="30" step="0.5"></div>
     <div class="rg"><label>Kart eşiği <b id="vc"></b></label><input type="range" id="tc" min="2" max="40" step="0.5"></div>
     <div class="rg"><label>Penaltı eşiği <b id="vp"></b></label><input type="range" id="tp" min="0.5" max="10" step="0.1"></div>
@@ -857,6 +863,9 @@ function mtype(nm){
   nm=String(nm||"").toLowerCase();
   var half=/first half|1st half|half time|halftime/.test(nm),second=/second half|2nd half/.test(nm),team=/home|away|team total|team -/.test(nm);
   if(second)return null;
+  // korner ve kart alt/üst ayrı pazarlardır (crn, crd); gol hesabına hiçbir zaman girmezler
+  if(/corner/.test(nm)&&/over\/under|over under|total corners$|^corners$/.test(nm)&&!team&&!half&&!/3 ?way|1x2|asian|handicap/.test(nm))return "crn";
+  if(/card|booking/.test(nm)&&/over\/under|over under/.test(nm)&&!team&&!half&&!/asian|handicap|point/.test(nm))return "crd";
   // korner, kart, uzatma, penaltı, handikap vb. bahisler gol pazarı değildir (ör. "Corners Over Under" gol alt/üstü sanılmasın)
   if(/corner|card|booking|extra time|penalt|offside|shot|foul|throw|handicap|asian|minute|interval|player|scorer|clean sheet|odd\/even/.test(nm))return null;
   if(/ht\/ft|half time\/full time|halftime\/fulltime/.test(nm))return "htft";
@@ -871,7 +880,7 @@ function vkey(t,v){
   if(t==="1x2"||t==="ht1x2")return v==="home"||v==="1"?"H":v==="draw"||v==="x"?"D":v==="away"||v==="2"?"A":null;
   if(t==="btts")return v==="yes"?"Y":v==="no"?"N":null;
   if(t==="dc")return /home\/draw|1x/.test(v)?"1X":/home\/away|12/.test(v)?"12":/draw\/away|x2/.test(v)?"X2":null;
-  if(t==="ou"||t==="htou"){var q=v.match(/^(over|under)\s*([\d.]+)/);return q?(q[1]==="over"?"O":"U")+q[2]:null}
+  if(t==="ou"||t==="htou"||t==="crn"||t==="crd"){var q=v.match(/^(over|under)\s*([\d.]+)/);return q?(q[1]==="over"?"O":"U")+q[2]:null}
   return null;
 }
 // bahis şirketlerinin oranlarını pazar bazında ortalama olasılığa çevir
@@ -889,8 +898,8 @@ function parseOdds0(bms){
       var t=mtype(b.name);if(!t)return;
       var vals={};(b.values||[]).forEach(function(v){var k=vkey(t,v.value),o=parseFloat(v.odd);if(k&&o>1)vals[k]=o});
       var groups=[];
-      if(t==="ou"||t==="htou"){var lines={};Object.keys(vals).forEach(function(k){var L=k.slice(1);(lines[L]=lines[L]||{})[k[0]]=vals[k]});
-        Object.keys(lines).forEach(function(L){if(lines[L].O&&lines[L].U&&+L<=(t==="htou"?3.5:6.5)&&/\.5$/.test(L))groups.push([t+L,lines[L]])})}
+      if(t==="ou"||t==="htou"||t==="crn"||t==="crd"){var lines={},MX={ou:6.5,htou:3.5,crn:15.5,crd:9.5}[t],MN=t==="crn"?4.5:0;Object.keys(vals).forEach(function(k){var L=k.slice(1);(lines[L]=lines[L]||{})[k[0]]=vals[k]});
+        Object.keys(lines).forEach(function(L){if(lines[L].O&&lines[L].U&&+L<=MX&&+L>=MN&&/\.5$/.test(L))groups.push([t+L,lines[L]])})}
       else if(t==="dc"){groups.push([t,vals])}
       else groups.push([t,vals]);
       groups.forEach(function(g){
@@ -1144,7 +1153,9 @@ var KL={g:"Gol",c:"Kart",p:"Penaltı"};
    Sunucu seçili liglerdeki maçların oranlarını 3 saatte bir ve maçtan hemen önce kaydeder.
    Liste bu oranların kâr payı temizlenmiş olasılıklarını sıralar; karne, biten maçlarda bu olasılıkların ne kadar tuttuğunu gösterir. */
 var PK={st:"",t:0,list:[],msg:""},PC={st:"",t:0,d:null},KUP=[];
-var PKG=[["all","Tümü"],["ms","Maç sonucu"],["cs","Çifte şans"],["gol","Gol"],["kg","KG"],["iy","İlk yarı"]];
+var PKG=[["all","Tümü"],["ms","Maç sonucu"],["cs","Çifte şans"],["gol","Gol"],["kg","KG"],["iy","İlk yarı"],["kr","Korner"],["kt","Kart"]];
+var PKN={ms:"Maç sonucu",cs:"Çifte şans",gol:"Gol",kg:"KG",iy:"İlk yarı",kr:"Korner",kt:"Kart"};
+if(!SET.kh)SET.kh=2;
 if(!SET.pkg)SET.pkg="all";if(!SET.pkt)SET.pkt=.7;if(SET.pkd==null)SET.pkd=0;
 function pkLabel(key,k,h,a){
   if(key==="1x2")return k==="H"?"MS 1 · "+h+" kazanır":k==="D"?"MS X · beraberlik":"MS 2 · "+a+" kazanır";
@@ -1152,9 +1163,10 @@ function pkLabel(key,k,h,a){
   if(key==="btts")return k==="Y"?"KG var":"KG yok";
   if(key==="ht1x2")return k==="H"?"İY 1 · "+h:k==="D"?"İY X":"İY 2 · "+a;
   var q=key.match(/^(ht)?ou([\d.]+)$/);if(q)return (q[1]?"İY ":"")+q[2].replace(".",",")+" "+(k==="O"?"üst":"alt");
+  q=key.match(/^(crn|crd)([\d.]+)$/);if(q)return (q[1]==="crn"?"Korner ":"Kart ")+q[2].replace(".",",")+" "+(k==="O"?"üst":"alt");
   return key+" "+k;
 }
-function pkGrp(key){return key==="1x2"?"ms":key==="dc"?"cs":key==="btts"?"kg":/^ht/.test(key)?"iy":/^ou/.test(key)?"gol":null}
+function pkGrp(key){return key==="1x2"?"ms":key==="dc"?"cs":key==="btts"?"kg":/^ht/.test(key)?"iy":/^ou/.test(key)?"gol":/^crn/.test(key)?"kr":/^crd/.test(key)?"kt":null}
 function dayOf(ts){var a=new Date(ts*1000);a.setHours(0,0,0,0);var b=new Date();b.setHours(0,0,0,0);return dlabel(Math.round((a-b)/864e5))}
 function pkRows(){
   var out=[],now=Date.now()/1000,d0=new Date();d0.setHours(0,0,0,0);var day0=d0.getTime()/1000;
@@ -1163,7 +1175,7 @@ function pkRows(){
     var dd=Math.floor((x.ts-day0)/86400);if(SET.pkd!=="all"&&dd!==SET.pkd)return;
     Object.keys(x.m).forEach(function(key){
       var g=pkGrp(key);if(!g||key==="ou0.5"||key==="htou2.5"||key==="htou3.5")return;if(SET.pkg!=="all"&&g!==SET.pkg)return;
-      Object.keys(x.m[key]).forEach(function(k){var v=x.m[key][k];if(v.p>=SET.pkt)out.push({id:x.fid+"|"+key+"|"+k,x:x,key:key,k:k,p:v.p,o:v.o,lab:pkLabel(key,k,x.h,x.a)})});
+      Object.keys(x.m[key]).forEach(function(k){var v=x.m[key][k];if(v.p>=SET.pkt)out.push({id:x.fid+"|"+key+"|"+k,x:x,key:key,k:k,g:g,p:v.p,o:v.o,lab:pkLabel(key,k,x.h,x.a)})});
     });
   });
   return out.sort(function(a,b){return b.p-a.p});
@@ -1185,18 +1197,56 @@ function kupon(){
     '<div class="mg" style="margin:0"><div><span>Birlikte tutma</span><b>'+pct(P)+'</b></div><div><span>Toplam oran</span><b>'+O.toFixed(2).replace(".",",")+'</b></div><div><span>Seçim</span><b>'+rows.length+'</b></div><div><span>Tek tek ort.</span><b>'+pct(rows.reduce(function(a,r){return a+r.p},0)/rows.length)+'</b></div></div>'+
     '<p class="an" style="margin-top:10px">'+(dup?'Aynı maçtan birden çok seçim var; bunlar birbirine bağlı olduğu için birlikte tutma olasılığı yaklaşıktır. ':'')+'Seçimler birbirinden bağımsız sayılarak çarpılır. Seçim sayısı arttıkça birlikte tutma olasılığı hızla düşer.</p></div>';
 }
+/* otomatik kuponlar: her maçtan en fazla bir seçim; olasılığı en yüksek kombinasyon */
+function autoKup(R){
+  var best={},c=[];
+  R.forEach(function(r){var f=r.x.fid;(best[f]=best[f]||[]).push(r)});
+  Object.keys(best).forEach(function(f){best[f].sort(function(a,b){return b.p-a.p});best[f].slice(0,3).forEach(function(r){c.push(r)})});
+  c.sort(function(a,b){return b.p-a.p});c=c.slice(0,24);
+  var byN=function(n){var used={},out=[];for(var i=0;i<c.length&&out.length<n;i++){if(used[c[i].x.fid])continue;used[c[i].x.fid]=1;out.push(c[i])}return out.length===n?out:null};
+  // hedef oran: 2–5 seçimlik kombinasyonlar arasında oranı hedefe ulaşan ve birlikte tutma olasılığı en yüksek olan
+  var T=SET.kh,bestT=null,cur=[];
+  (function dfs(i,P,O){
+    if(O>=T){if(!bestT||P>bestT.P)bestT={L:cur.slice(),P:P,O:O};return}
+    if(cur.length>=5||i>=c.length)return;
+    if(bestT&&P<=bestT.P)return;
+    for(var k=i;k<c.length;k++){var r=c[k];if(cur.some(function(z){return z.x.fid===r.x.fid}))continue;cur.push(r);dfs(k+1,P*r.p,O*r.o);cur.pop()}
+  })(0,1,1);
+  var K=[];
+  [[2,"Güvenli 2'li"],[3,"Dengeli 3'lü"],[4,"İddialı 4'lü"]].forEach(function(z){var L=byN(z[0]);if(L)K.push({t:z[1],L:L})});
+  if(bestT)K.push({t:"Hedef oran "+String(T).replace(".",","),L:bestT.L,tg:1});else K.noT=1;
+  return K;
+}
+function kupCards(R){
+  var K=autoKup(R),h='<div class="sec"><h2>Hazır kuponlar</h2><span>her maçtan bir seçim</span></div>';
+  h+='<div class="pkg">'+[1.5,2,3,5].map(function(v){return '<button data-kh="'+v+'" class="'+(SET.kh===v?'on':'')+'">Hedef oran '+String(v).replace(".",",")+'</button>'}).join("")+'</div>';
+  if(!K.length)return h+'<p class="an" style="margin:0 2px 14px">Kupon için yeterli seçim yok; olasılık eşiğini düşür ya da gün aralığını genişlet.</p>';
+  if(K.noT)h+='<p class="an" style="margin:0 2px 12px">Bu filtrelerle en fazla 5 seçimle oran '+String(SET.kh).replace(".",",")+'’e ulaşılamıyor; eşiği düşür ya da daha düşük hedef seç.</p>';
+  return h+K.map(function(k){
+    var P=k.L.reduce(function(a,r){return a*r.p},1),O=k.L.reduce(function(a,r){return a*r.o},1),mix={};
+    k.L.forEach(function(r){mix[r.g]=(mix[r.g]||0)+1});
+    var ids=k.L.map(function(r){return r.id}).join(",");
+    return '<div class="cal kc"><div class="bh"><h4>'+k.t+'</h4><span>'+Object.keys(mix).map(function(g){return mix[g]+" "+PKN[g].toLowerCase()}).join(" + ")+'</span></div>'+
+      k.L.map(function(r){return '<div class="kl"><span>'+hhmm(r.x.ts)+(dayOf(r.x.ts)!=="Bugün"?'<br>'+dayOf(r.x.ts):'')+'</span><div><b>'+E(r.lab)+'</b><small>'+E(r.x.h)+' – '+E(r.x.a)+'</small></div><em>'+pct(r.p)+'</em></div>'}).join("")+
+      '<div class="mg" style="margin:10px 0 0"><div><span>Birlikte tutma</span><b>'+pct(P)+'</b></div><div><span>Toplam oran</span><b>'+O.toFixed(2).replace(".",",")+'</b></div><div><span>Seçim</span><b>'+k.L.length+'</b></div><div><span></span><button class="lnk" data-kup="'+E(ids)+'">Seçimlerime al</button></div></div></div>';
+  }).join("")+'<p class="an" style="margin:-4px 2px 16px">Kuponlar yukarıdaki pazar, gün ve olasılık filtrelerine göre kurulur. Her ek seçim, bahis şirketinin kâr payını da çarpar; çok seçimli kupon uzun vadede tek seçimden daha dezavantajlıdır.</p>';
+}
 function calibCard(){
   var h='<div class="cal"><div class="bh"><h4>Bu olasılıklar ne kadar tuttu?</h4><span>biten maçlar</span></div>';
   var D=PC.d;if(!D){return h+'<p class="an">'+(PC.err?'Karne alınamadı: '+E(PC.err):'Yükleniyor…')+'</p></div>'}
   var c=D.cnt||{};
   var info='<p class="an" style="margin-top:10px">Toplanan veri: '+(c.f||0)+' maç, '+(c.o||0)+' oran kaydı, '+(c.s||0)+' maçın dakika verisi; '+(D.n||0)+' biten maç karşılaştırıldı. Her biten maçta, başlamadan önceki son oranın verdiği olasılık gerçek sonuçla karşılaştırılır. "Gerçekleşen" "Tahmin"e ne kadar yakınsa olasılıklar o kadar güvenilirdir.</p>';
-  var gs=SET.pkg==="all"?["ms","cs","gol","kg","iy"]:[SET.pkg],T=D.b.map(function(){return[0,0,0]});
+  var gs=SET.pkg==="all"?["ms","cs","gol","kg","iy","kr","kt"]:[SET.pkg],T=D.b.map(function(){return[0,0,0]});
   gs.forEach(function(g){(D.g[g]||[]).forEach(function(r,i){T[i][0]+=r[0];T[i][1]+=r[1];T[i][2]+=r[2]})});
   if(!T.some(function(r){return r[0]}))return h+'<p class="an">Henüz sonuçlanmış maç yok. Sunucu seçili liglerin maçlarını kaydetmeye başladı; maçlar bittikçe bu tablo dolacak (anlamlı sonuç için birkaç hafta gerekir).</p>'+info+'</div>';
   h+='<table><tr><th>Olasılık</th><th>Seçim</th><th>Tahmin</th><th>Gerçekleşen</th></tr>';
   T.forEach(function(r,i){var lo=Math.round(D.b[i]*100),hi=i<D.b.length-1?Math.round(D.b[i+1]*100):100;
     h+='<tr><td>%'+lo+'–'+hi+'</td><td>'+r[0]+'</td><td>'+(r[0]?pct(r[1]/r[0]):'–')+'</td><td>'+(r[0]?pct(r[2]/r[0])+'<br><small class="an">%'+wil(r[2],r[0])+'</small>':'–')+'</td></tr>'});
-  return h+'</table>'+info+'</div>';
+  h+='</table>';
+  // pazara göre ayrı satırlar: hangi pazar ne kadar güvenilir
+  var G=Object.keys(PKN).map(function(g){var t=[0,0,0];(D.g[g]||[]).forEach(function(r){t[0]+=r[0];t[1]+=r[1];t[2]+=r[2]});return[g,t]}).filter(function(x){return x[1][0]});
+  if(G.length>1)h+='<h5 style="margin:16px 0 8px">Pazara göre</h5><table><tr><th>Pazar</th><th>Seçim</th><th>Tahmin</th><th>Gerçekleşen</th></tr>'+G.map(function(x){var t=x[1];return '<tr><td>'+PKN[x[0]]+'</td><td>'+t[0]+'</td><td>'+pct(t[1]/t[0])+'</td><td>'+pct(t[2]/t[0])+'<br><small class="an">%'+wil(t[2],t[0])+'</small></td></tr>'}).join("")+'</table>';
+  return h+info+(gs.indexOf("kt")>-1?'<p class="an" style="margin-top:6px">Kart sayısı sarı + kırmızı kart olarak hesaplanır; bazı şirketler kırmızıyı 2 sayar.</p>':'')+'</div>';
 }
 function picksView(){
   var h='<div class="segs"><div class="seg">'+[[0,"Bugün"],[1,"Yarın"],["all","48 saat"]].map(function(x){return '<button data-pkd="'+x[0]+'" class="'+(SET.pkd===x[0]?'on':'')+'">'+x[1]+'</button>'}).join("")+'</div></div>';
@@ -1207,11 +1257,12 @@ function picksView(){
   if(PK.st!=="ok")return h+empty("Yükleniyor","Oranlar sunucudan alınıyor.");
   var R=pkRows();
   h+=kupon();
-  h+='<div class="sec"><h2>Öneriler</h2><span>'+R.length+' seçim</span></div>';
+  if(R.length)h+=kupCards(R);
+  h+='<div class="sec"><h2>Seçimler</h2><span>'+R.length+' seçim</span></div>';
   if(!PK.list.length)h+='<p class="an" style="margin:-4px 2px 12px">Sunucu oranları 3 saatte bir topluyor. Kurulumdan sonraki ilk saatte liste boş olabilir.</p>';
   if(!R.length)h+=empty("Bu eşiği geçen seçim yok","Olasılık eşiğini düşür ya da başka bir gün veya pazar seç.");
   else h+='<div class="rows">'+R.slice(0,80).map(function(r){var on=KUP.indexOf(r.id)>-1;
-    return '<div class="al pk'+(on?' on':'')+'" data-pk="'+E(r.id)+'"><div class="mn">'+hhmm(r.x.ts)+'<small>'+dayOf(r.x.ts)+'</small></div><div><div class="mt">'+E(r.x.h)+' – '+E(r.x.a)+' <small class="an">· '+E(String(r.x.lg||"").split(" • ").pop())+'</small></div><div class="tx"><b>'+E(r.lab)+'</b> · oran '+r.o.toFixed(2).replace(".",",")+'</div></div><div class="pp"><b>'+pct(r.p)+'</b><small>'+(on?'seçildi':'ekle')+'</small></div></div>'}).join("")+'</div>';
+    return '<div class="al pk'+(on?' on':'')+'" data-pk="'+E(r.id)+'"><div class="mn">'+hhmm(r.x.ts)+'<small>'+dayOf(r.x.ts)+'</small></div><div><div class="mt">'+E(r.x.h)+' – '+E(r.x.a)+' <small class="an">· '+E(String(r.x.lg||"").split(" • ").pop())+'</small></div><div class="tx">'+(r.g==="kr"||r.g==="kt"?'<span class="tag '+r.g+'">'+PKN[r.g]+'</span> ':'')+'<b>'+E(r.lab.replace(/^(Korner|Kart) /,""))+'</b> · oran '+r.o.toFixed(2).replace(".",",")+'</div></div><div class="pp"><b>'+pct(r.p)+'</b><small>'+(on?'seçildi':'ekle')+'</small></div></div>'}).join("")+'</div>';
   h+='<div style="height:14px"></div>'+calibCard();
   h+='<p class="note">Olasılıklar bahis oranlarından, şirketin kâr payı çıkarılarak hesaplanır'+(PK.list[0]&&PK.list[0].src?' (Pinnacle varsa ondan)':'')+'. Bu, piyasanın kendi görüşüdür; yüksek olasılık düşük oran demektir ve uzun vadede kazanç anlamına gelmez. Liste bir bilgi aracıdır, karar ve risk sana aittir.</p>';
   return h;
@@ -1811,6 +1862,8 @@ document.addEventListener("click",function(e){
   else if(b.dataset.pkd!=null){SET.pkd=b.dataset.pkd==="all"?"all":+b.dataset.pkd;save("mr_set",SET)}
   else if(b.dataset.pkg){SET.pkg=b.dataset.pkg;save("mr_set",SET)}
   else if(b.dataset.a==="kclr"){KUP=[]}
+  else if(b.dataset.kh){SET.kh=+b.dataset.kh;save("mr_set",SET)}
+  else if(b.dataset.kup){KUP=b.dataset.kup.split(",");window.scrollTo(0,0);toast("Kupon seçimlerine alındı")}
   else if(b.dataset.bd!=null){S.bd=+b.dataset.bd;loadBulten(S.bd)}
   else if(b.dataset.bs){S.bs=b.dataset.bs}
   else if(b.dataset.hz){SET.hz=b.dataset.hz;save("mr_set",SET);setTH();calcCal();thUI();toast("Tahmin aralığı: "+hzText())}
