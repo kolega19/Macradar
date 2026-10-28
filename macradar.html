@@ -347,7 +347,7 @@ button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
     <p>Tahmin aralığı: kaç dakika sonrasına kadarki olayların tahmin edileceği. "4 dk telafili", canlı verinin yaklaşık 1 dakika geç gelmesini hesaba katar ve şu andan itibaren 4 dakikayı hedefler.</p>
     <div class="seg" id="hzs" style="margin:4px 0 14px"><button data-hz="d">4 dk telafili</button><button data-hz="3">3 dk</button><button data-hz="4">4 dk</button><button data-hz="5">5 dk</button></div>
     <p>Uyarı, bir takımın ihtimali bu eşikleri geçince gelir. Varsayılan eşikler, geçmiş maçlarda modelin en yüksek ihtimal verdiği %10'luk dilimin başlangıcıdır. <button class="lnk" id="thr">Varsayılana dön</button></p>
-    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 28.10 · 1</p>
+    <p class="an" style="margin-top:18px;opacity:.7">MaçRadar sürüm 28.10 · 2</p>
     <div class="rg"><label>Gol eşiği <b id="vg"></b></label><input type="range" id="tg" min="2" max="30" step="0.5"></div>
     <div class="rg"><label>Kart eşiği <b id="vc"></b></label><input type="range" id="tc" min="2" max="40" step="0.5"></div>
     <div class="rg"><label>Penaltı eşiği <b id="vp"></b></label><input type="range" id="tp" min="0.5" max="10" step="0.1"></div>
@@ -1156,6 +1156,8 @@ var PK={st:"",t:0,list:[],msg:""},PC={st:"",t:0,d:null},KUP=[];
 var PKG=[["all","Tümü"],["ms","Maç sonucu"],["cs","Çifte şans"],["gol","Gol"],["kg","KG"],["iy","İlk yarı"],["kr","Korner"],["kt","Kart"]];
 var PKN={ms:"Maç sonucu",cs:"Çifte şans",gol:"Gol",kg:"KG",iy:"İlk yarı",kr:"Korner",kt:"Kart"};
 if(!SET.kh)SET.kh=2;
+// Türkiye'de yasal bahiste yaygın açılan çizgiler; 0,5 / 4,5+ gibi uç çizgiler ve oranı 1,05'in altındaki seçimler önerilmez
+var PK_LINES=["ou1.5","ou2.5","ou3.5","htou0.5","htou1.5","crn8.5","crn9.5","crn10.5","crd3.5","crd4.5","crd5.5"];
 if(!SET.pkg)SET.pkg="all";if(!SET.pkt)SET.pkt=.7;if(SET.pkd==null)SET.pkd=0;
 function pkLabel(key,k,h,a){
   if(key==="1x2")return k==="H"?"MS 1 · "+h+" kazanır":k==="D"?"MS X · beraberlik":"MS 2 · "+a+" kazanır";
@@ -1174,8 +1176,8 @@ function pkRows(){
     if(x.ts<now)return; // başlamış maç önerilmez
     var dd=Math.floor((x.ts-day0)/86400);if(SET.pkd!=="all"&&dd!==SET.pkd)return;
     Object.keys(x.m).forEach(function(key){
-      var g=pkGrp(key);if(!g||key==="ou0.5"||key==="htou2.5"||key==="htou3.5")return;if(SET.pkg!=="all"&&g!==SET.pkg)return;
-      Object.keys(x.m[key]).forEach(function(k){var v=x.m[key][k];if(v.p>=SET.pkt)out.push({id:x.fid+"|"+key+"|"+k,x:x,key:key,k:k,g:g,p:v.p,o:v.o,lab:pkLabel(key,k,x.h,x.a)})});
+      var g=pkGrp(key);if(!g||PK_LINES.indexOf(key)<0&&/^(ht)?ou|^cr/.test(key))return;if(SET.pkg!=="all"&&g!==SET.pkg)return;
+      Object.keys(x.m[key]).forEach(function(k){var v=x.m[key][k];if(v.p>=SET.pkt&&v.o>=1.05)out.push({id:x.fid+"|"+key+"|"+k,x:x,key:key,k:k,g:g,p:v.p,o:v.o,lab:pkLabel(key,k,x.h,x.a)})});
     });
   });
   return out.sort(function(a,b){return b.p-a.p});
